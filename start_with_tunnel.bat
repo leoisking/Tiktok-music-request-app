@@ -153,9 +153,9 @@ if errorlevel 1 (
     set "SKIP_THRESHOLD=10"
 )
 
-if "%CONTROL_PASSWORD%"=="" (
+if not defined CONTROL_PASSWORD (
     echo [SECURITY] Set a control panel password to protect moderator actions.
-    set /p CONTROL_PASSWORD=Enter control panel password ^(or press Enter to skip^): 
+    set /p "CONTROL_PASSWORD=Enter a unique control password (Enter disables browser controls): "
 )
 
 echo.
@@ -168,8 +168,8 @@ if not "%TWITCH_CHANNEL%"=="" echo Twitch Channel: %TWITCH_CHANNEL%
 echo Port: %PORT%
 echo Skip Threshold: %SKIP_THRESHOLD%
 echo Auto Next on Threshold: %AUTO_NEXT_ON_THRESHOLD%
-if "%CONTROL_PASSWORD%"=="" (
-    echo Control Password: NOT SET
+if not defined CONTROL_PASSWORD (
+    echo Control Password: NOT SET - browser controls disabled
 ) else (
     echo Control Password: *** SET ***
 )
@@ -231,20 +231,16 @@ echo.
 echo [START] Starting Cloudflare Tunnel...
 echo.
 echo ========================================
-echo   IMPORTANT: Copy the tunnel URL below
+echo   Both overlays open automatically
 echo ========================================
 echo.
-echo After the tunnel starts:
-echo   1. Copy the tunnel URL ^(https://xxx.trycloudflare.com^)
-echo   2. Use main overlay URL:
-echo      https://xxx.trycloudflare.com/
-echo   3. Use queue overlay URL:
-echo      https://xxx.trycloudflare.com/queue_widget
-echo   4. Run: open_control_panel.bat
-echo   5. Paste the tunnel base URL when prompted
+echo The skip and queue HTTPS pages will open when reachable.
+echo Both links will also be saved to last_tunnel_urls.txt.
+echo Use those links for your two TikTok Studio browser sources.
+echo Local controls: http://127.0.0.1:%PORT%/control
 echo.
 
-cloudflared tunnel --url "http://127.0.0.1:%PORT%"
+python "%~dp0_launch_overlay_tunnel.py" --port "%PORT%"
 
 echo.
 echo ========================================

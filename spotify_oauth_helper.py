@@ -3,7 +3,6 @@ import json
 import os
 import secrets
 import threading
-import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -44,10 +43,11 @@ def _exchange_code_for_tokens(client_id, client_secret, code, redirect_uri):
 
 
 class CallbackServer:
-    def __init__(self, host, port, expected_state):
+    def __init__(self, host, port, expected_state, callback_path="/callback"):
         self.host = host
         self.port = port
         self.expected_state = expected_state
+        self.callback_path = callback_path
         self.code = None
         self.error = None
         self.done = threading.Event()
@@ -59,22 +59,33 @@ class CallbackServer:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 parsed = urllib.parse.urlparse(self.path)
-                if parsed.path != "/callback":
+                if parsed.path != parent.callback_path:
                     self.send_response(404)
                     self.end_headers()
                     return
 
-                params = urllib.parse.parse_qs(parsed.query)
+                try:
+                    params = urllib.parse.parse_qs(parsed.query, max_num_fields=10)
+                except ValueError:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
                 state = (params.get("state") or [""])[0]
                 code = (params.get("code") or [""])[0]
                 error = (params.get("error") or [""])[0]
                 error_description = (params.get("error_description") or [""])[0]
 
+                if not secrets.compare_digest(state.encode("utf-8"), parent.expected_state.encode("utf-8")):
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                if parent.done.is_set():
+                    self.send_response(409)
+                    self.end_headers()
+                    return
                 if error:
                     detail = f" ({error_description})" if error_description else ""
                     parent.error = f"Spotify returned error: {error}{detail}"
-                elif state != parent.expected_state:
-                    parent.error = "State mismatch. OAuth callback was not trusted."
                 elif not code:
                     parent.error = "No authorization code in callback."
                 else:
@@ -82,6 +93,9 @@ class CallbackServer:
 
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
                 if parent.error:
                     self.wfile.write(
@@ -116,13 +130,23 @@ def main():
         print("Set them in this terminal and run again.")
         return 1
 
-    parsed_redirect = urllib.parse.urlparse(redirect_uri)
-    if parsed_redirect.scheme != "http" or parsed_redirect.hostname not in ("127.0.0.1", "localhost") or not parsed_redirect.port:
+    try:
+        parsed_redirect = urllib.parse.urlparse(redirect_uri)
+        valid_redirect = (
+            parsed_redirect.scheme == "http"
+            and parsed_redirect.hostname in ("127.0.0.1", "localhost")
+            and parsed_redirect.port
+            and parsed_redirect.path.startswith("/")
+            and not (parsed_redirect.username or parsed_redirect.password or parsed_redirect.query or parsed_redirect.fragment)
+        )
+    except ValueError:
+        valid_redirect = False
+    if not valid_redirect:
         print("[ERROR] SPOTIFY_REDIRECT_URI must be a local http URL with a port, e.g. http://127.0.0.1:8888/callback")
         return 1
 
     state = secrets.token_urlsafe(24)
-    callback_server = CallbackServer(parsed_redirect.hostname, parsed_redirect.port, state)
+    callback_server = CallbackServer(parsed_redirect.hostname, parsed_redirect.port, state, parsed_redirect.path)
     try:
         callback_server.start()
     except OSError as e:
@@ -154,12 +178,10 @@ def main():
     except Exception:
         pass
 
-    timeout_sec = 180
-    start = time.time()
-    while not callback_server.done.is_set() and (time.time() - start) < timeout_sec:
-        time.sleep(0.2)
-
-    callback_server.stop()
+    try:
+        callback_server.done.wait(timeout=180)
+    finally:
+        callback_server.stop()
 
     if not callback_server.done.is_set():
         print("[ERROR] Timed out waiting for callback.")

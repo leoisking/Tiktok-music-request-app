@@ -1,15 +1,50 @@
-# Project place file
-/flask-tiktok-socket-setup.rbxlx
-
-# Roblox Studio lock files
-/*.rbxlx.lock
-/*.rbxl.lock
-
-sourcemap.json
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.venv/
+.build-venv/
+node_modules/
 
 # Local configuration and runtime output
 spotify_env.bat
-__pycache__/
-*.py[cod]
 logs/
 last_tunnel_urls.txt
+.env
+.env.*
+!.env.example
+spotify_manual_queue_state.json
+spotify_manual_queue_state.json.tmp
+
+# Windows executable build output
+build/
+dist/
+
+# Local Windows convenience files
+*.lnk
+__tmp_test.bat
+_start_widget.bat
+check_status.bat
+
+# Unrelated starter scaffold retained locally only
+aftman.toml
+default.project.json
+src/
+tests/index.html
+sourcemap.json
+/*.rbxlx
+/*.rbxlx.lock
+/*.rbxl.lock
+
+# Superseded local documentation
+CLOUDFLARE_TUNNEL_SETUP.md
+CONTROL_PANEL_GUIDE.md
+CONTROL_PANEL_QUICKSTART.md
+CONTROL_SERVER_README.md
+DUAL_TUNNEL_SETUP.md
+IMPROVEMENTS.md
+QUICK_REFERENCE.md
+RELIABILITY_GUIDE.md
+SECURITY_AND_UX.md
+SETUP_OPTIONS.md
+TIKTOK_STUDIO_QUICKSTART.md
+URL_GUIDE.md

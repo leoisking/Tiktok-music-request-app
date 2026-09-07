@@ -15,14 +15,12 @@
     ║  • !reset / !next — reset skip votes (mods only)          ║
     ╚═══════════════════════════════════════════════════════════╝
 -->
-<html lang="en">
+<html lang="en" class="transparent-bg">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' ws: wss:; font-src https://fonts.gstatic.com; img-src 'self' data:;">
     <title>Midlife Disaster — Live Widget</title>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -788,7 +786,6 @@
         .mod-feedback.show { opacity: 1; }
 
         .hidden-panel { display: none !important; }
-        .requests-panel.disabled-by-default { display: none !important; }
 
         /* ═══ FULL PANEL FLASH ON THRESHOLD ═══ */
         .voting-panel.threshold-flash .border-glow::before {
@@ -901,9 +898,79 @@
 
         /* Keep mod/test panels visually muted by default (they are hidden unless opened) */
         .mod-panel, .test-panel { display: none; }
+        .mod-bar, .test-bar, .control-heading, .control-auth { display: none; }
+        html.controls-mode { height: auto; min-height: 100%; overflow-y: auto; }
+        body.controls-mode { display: flex; flex-direction: column; height: auto; min-height: 100vh; overflow: visible; padding-bottom: 24px; }
+        .controls-mode .control-heading { display: block; order: 0; width: 100%; max-width: 760px; margin: 20px auto 0; padding: 16px; color: #fff; }
+        .control-heading h1 { font-size: 24px; margin-bottom: 8px; }
+        .control-heading p { font-size: 14px; line-height: 1.6; color: #d5d1e0; }
+        .control-heading a { color: #77e1da; }
+        .controls-mode .mod-bar, .controls-mode .test-bar { display: block; position: relative; inset: auto; width: 100%; max-width: 728px; margin: 12px auto; padding: 0 12px; }
+        .controls-mode .control-auth { display: flex; flex-direction: column; gap: 10px; order: 1; width: calc(100% - 24px); max-width: 704px; margin: 12px auto; padding: 16px; border: 1px solid #459b97; border-radius: 12px; background: #111b22; color: #fff; }
+        .control-auth h2 { font-size: 18px; }
+        .control-auth label { font-size: 14px; font-weight: 700; }
+        .control-auth input { width: 100%; padding: 10px; border: 1px solid #6a8295; border-radius: 6px; background: #070c12; color: #fff; }
+        .control-auth-actions { display: flex; gap: 8px; }
+        .control-auth-actions button { flex: 1; }
+        .control-auth-status { font-size: 14px; line-height: 1.5; color: #c9eee9; }
+        .controls-mode .mod-bar { order: 2; }
+        .controls-mode .test-bar { order: 3; }
+        .controls-mode .widget-wrapper { order: 4; height: auto; min-height: 0; max-width: 728px; margin: 16px auto; }
+        .controls-mode .requests-panel { flex: none; height: 420px; }
+        .controls-mode .conn-banner { top: auto; bottom: 12px; max-width: calc(100vw - 24px); }
+        .controls-mode .mod-panel, .controls-mode .test-panel { width: 100%; padding: 16px; }
+        .controls-mode button, .controls-mode input:not([type="checkbox"]), .controls-mode textarea { min-height: 44px; font: inherit; font-size: 14px; }
+        .controls-mode input { min-width: 0; }
+        .controls-mode .mod-feedback, .controls-mode .test-feedback { font-size: 14px; min-height: 20px; }
+        .controls-mode button:disabled, .controls-mode input:disabled { opacity: .5; cursor: not-allowed; }
+        button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid #77e1da; outline-offset: 3px; }
+        .control-note { font-size: 13px; line-height: 1.5; color: #d5d1e0; }
+        .control-warning { color: #ffd79a; }
+        @media screen and (max-width: 480px) {
+            .widget-wrapper { padding: 8px !important; }
+        }
+        html.transparent-bg .bg-particles { display: none; }
+        html.transparent-bg .widget-wrapper { min-height: 0; padding: 8px !important; }
+        html.transparent-bg .voting-panel {
+            background: transparent !important;
+            border: 0;
+            box-shadow: none;
+            backdrop-filter: none;
+            overflow: visible;
+        }
+        html.transparent-bg .voting-panel .border-glow,
+        html.transparent-bg .voting-panel .glow-line { display: none; }
+        html.transparent-bg .compact-skip { width: min(170px, 100%); }
+        html.transparent-bg .voting-panel .skip-count,
+        html.transparent-bg .voting-panel .skip-command-box,
+        html.transparent-bg .voting-panel .skip-command-arrow {
+            color: #fff !important;
+            text-shadow: 0 1px 2px #000, 0 0 4px #000 !important;
+        }
+        html.transparent-bg .voting-panel .skip-circle-bg circle { stroke: rgba(255,255,255,0.7); }
+        html.transparent-bg .voting-panel .skip-circle-bg circle,
+        html.transparent-bg .voting-panel .skip-circle-fill circle {
+            filter: drop-shadow(0 1px 2px #000) !important;
+        }
     </style>
 </head>
 <body>
+    <header class="control-heading">
+        <h1>Live stream controls</h1>
+        <p>Keep this page off-stream. <a href="/" target="_blank" rel="noopener">Skip overlay</a> · <a href="/queue_widget" target="_blank" rel="noopener">Song queue overlay</a></p>
+        <p>Unlock below before using moderator controls or Test chat.</p>
+    </header>
+    <section class="control-auth" id="control-auth" aria-labelledby="control-auth-title">
+        <h2 id="control-auth-title">Unlock controls</h2>
+        <label for="mod-password">Control password</label>
+        <input type="password" id="mod-password" autocomplete="current-password" maxlength="1024" placeholder="Enter your control password" aria-describedby="control-auth-help control-auth-status">
+        <p class="control-note" id="control-auth-help">Enter the CONTROL_PASSWORD set in the terminal that started this server. Changing it requires restarting the server. Never put passwords in URLs.</p>
+        <div class="control-auth-actions">
+            <button type="button" class="mod-btn" id="mod-login">Unlock</button>
+            <button type="button" class="mod-btn" id="mod-logout">Lock</button>
+        </div>
+        <p class="control-auth-status" id="control-auth-status" role="status" aria-live="polite">Locked. Enter your password and select Unlock before sending test commands.</p>
+    </section>
     <div class="bg-particles" id="particles"></div>
 
     <div class="widget-wrapper" role="main" aria-label="TikTok Live Widget">
@@ -1014,20 +1081,16 @@
     </div>
 
     <!-- Connection banner -->
-    <div class="conn-banner" id="conn-banner">Connection lost - reconnecting...</div>
+    <div class="conn-banner" id="conn-banner" role="status" aria-live="polite" aria-atomic="true">Connecting to overlay server...</div>
 
     <!-- Moderator bar -->
     <div class="mod-bar">
-        <div class="mod-toggle" id="mod-toggle">Mods ▾</div>
+        <button type="button" class="mod-toggle" id="mod-toggle" aria-expanded="false" aria-controls="mod-panel">Moderator controls ▾</button>
             <div class="mod-panel" id="mod-panel">
-                <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-                    <input type="password" id="mod-password" placeholder="Control password" style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.4);color:#fff;">
-                    <button class="mod-btn" id="mod-login" style="padding:6px 8px;">Save</button>
-                </div>
                 <button class="mod-btn" id="mod-clear">Clear Queue</button>
                 <button class="mod-btn" id="mod-reset">Reset Skip Votes</button>
                 <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
-                    <input type="text" id="mod-threshold" placeholder="Skip threshold (number or auto)" style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.4);color:#fff;">
+                    <input type="text" id="mod-threshold" aria-label="Skip threshold: 1 to 200, or auto" maxlength="8" placeholder="Skip threshold (1–200 or auto)" style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.4);color:#fff;">
                 </div>
                 <div style="display:flex;gap:6px;">
                     <button class="mod-btn" id="mod-threshold-set" style="flex:1;">Set Threshold</button>
@@ -1041,21 +1104,24 @@
                         <input type="checkbox" id="vis-skip" checked> Show Skip Meter
                     </label>
                 </div>
-                <div class="mod-feedback" id="mod-feedback"></div>
+                <p class="control-note">Clear Queue removes local requests only, not Spotify's playback queue. Reset Skip Votes does not skip a track.</p>
+                <div class="mod-feedback" id="mod-feedback" role="status" aria-live="polite"></div>
             </div>
     </div>
 
     <!-- Testing panel (simulate comments) -->
     <div class="test-bar">
-        <div class="test-toggle" id="test-toggle">Test ▾</div>
+        <button type="button" class="test-toggle" id="test-toggle" aria-expanded="false" aria-controls="test-panel">Test chat ▾</button>
         <div class="test-panel" id="test-panel">
-            <input type="text" id="test-username" placeholder="Username" value="TestUser">
-            <textarea id="test-message" rows="2" placeholder="Message or command (e.g. !req Song by Artist)"></textarea>
+            <button type="button" class="mod-btn" id="test-unlock">Enter password / unlock controls</button>
+            <p class="control-note control-warning">These commands affect the live queue and may control Spotify. Test before going live.</p>
+            <input type="text" id="test-username" aria-label="Test username" maxlength="100" placeholder="Username" value="TestUser">
+            <textarea id="test-message" aria-label="Test chat message" maxlength="280" rows="2" placeholder="Message or command (e.g. !req Song by Artist)"></textarea>
             <div class="test-row">
                 <label style="display:flex;align-items:center;gap:8px;color:#ffd79a;"><input type="checkbox" id="test-is-mod"> Moderator</label>
                 <button class="test-send" id="test-send">Send</button>
             </div>
-            <div class="test-feedback" id="test-feedback">Sent</div>
+            <div class="test-feedback" id="test-feedback" role="status" aria-live="polite"></div>
         </div>
     </div>
 
@@ -1078,14 +1144,21 @@
         let nowPlayingDisplayedElapsed = 0;
         let lastQueueEtaRefreshSec = -1;
         let queueItems = [];
+        let overlayConnected = false;
+        let nowPlayingNeedsSync = true;
+        let controlPassword = '';
+        try { controlPassword = sessionStorage.getItem('modPassword') || ''; } catch (error) {}
         const PAGE_PARAMS = new URLSearchParams(window.location.search);
         const DEMO_MODE_ENABLED = PAGE_PARAMS.get('demo') === '1';
         const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 42; // r=42 → ~263.894
         const DEFAULT_QUEUE_DURATION_SEC = 210;
+        const CONTROLS_MODE = window.location.pathname === '/control' || PAGE_PARAMS.get('controls') === '1';
+        document.body.classList.toggle('controls-mode', CONTROLS_MODE);
+        document.documentElement.classList.toggle('controls-mode', CONTROLS_MODE);
 
-        if (PAGE_PARAMS.get('bg') === 'transparent' || PAGE_PARAMS.get('transparent') === '1') {
-            document.documentElement.classList.add('transparent-bg');
-        }
+        const TRANSPARENT_BACKGROUND = PAGE_PARAMS.get('bg') === 'transparent' || PAGE_PARAMS.get('transparent') === '1' ||
+            (!CONTROLS_MODE && PAGE_PARAMS.get('bg') !== 'black' && PAGE_PARAMS.get('transparent') !== '0');
+        document.documentElement.classList.toggle('transparent-bg', TRANSPARENT_BACKGROUND);
 
         // ═══ PARTICLES ═══
         (function createParticles() {
@@ -1127,11 +1200,11 @@
             if (!banner) return;
             banner.className = 'conn-banner ' + type;
             banner.textContent = message;
-            setTimeout(function() { banner.classList.add('show'); }, 50);
+            banner.classList.add('show');
             clearTimeout(connBannerTimer);
-            connBannerTimer = setTimeout(function() {
-                banner.classList.remove('show');
-            }, 3000);
+            if (type === 'connected') {
+                connBannerTimer = setTimeout(function() { banner.classList.remove('show'); }, 3000);
+            }
         }
 
         function formatClock(seconds) {
@@ -1207,6 +1280,7 @@
         }
 
         function renderNowPlayingTick() {
+            if (!overlayConnected && !demoStarted) return;
             var trackEl = document.getElementById('now-playing-track');
             var timeEl = document.getElementById('now-playing-time');
             if (!trackEl || !timeEl) return;
@@ -1268,7 +1342,7 @@
             var incomingElapsed = incomingState.elapsed;
             var nowMs = Date.now();
 
-            if (!nowPlayingTrackKey || incomingKey !== nowPlayingTrackKey) {
+            if (nowPlayingNeedsSync || !nowPlayingTrackKey || incomingKey !== nowPlayingTrackKey || (nowPlayingState && !nowPlayingState.playing && incomingState.playing)) {
                 nowPlayingAnchorMs = nowMs - (incomingElapsed * 1000);
                 nowPlayingTrackKey = incomingKey;
                 nowPlayingDisplayedElapsed = incomingElapsed;
@@ -1291,6 +1365,7 @@
                 nowPlayingDisplayedElapsed = incomingElapsed;
             }
             nowPlayingState = incomingState;
+            nowPlayingNeedsSync = false;
             nowPlayingLastUpdateMs = Date.now();
 
             if (!nowPlayingTickerStarted) {
@@ -1353,6 +1428,7 @@
             document.getElementById('request-count').textContent = queueItems.length;
 
             if (queueItems.length === 0) {
+                previousCount = 0;
                 list.innerHTML = '';
                 list.appendChild(createEmptyState());
                 return;
@@ -1364,9 +1440,10 @@
 
             queueItems.forEach(function(item, i) {
                 var p = parseSong(item.song);
-                item.user = escapeHtml(item.user);
+                var requesterText = escapeHtml(item.user);
                 var div = document.createElement('div');
                 div.className = 'request-item';
+                div.setAttribute('role', 'listitem');
                 div.style.animationDelay = (i * 0.04) + 's';
 
                 var newest = i === queueItems.length - 1;
@@ -1395,7 +1472,7 @@
                         '</div>' +
                         eq +
                     '</div>' +
-                    '<div class="user-tag">&#128100; ' + item.user + '</div>' +
+                    '<div class="user-tag">&#128100; ' + requesterText + '</div>' +
                     '<div class="eta-tag" data-index="' + i + '">&#9201; ' + etaText + '</div>';
 
                 list.appendChild(div);
@@ -1550,25 +1627,84 @@
         });
 
         socket.on('connect', function() {
+            overlayConnected = true;
+            syncControlConnection();
             console.log('✅ Connected to server');
             try { socket.emit('request_state'); } catch (e) {}
             if (!hadLiveConnection) {
                 hadLiveConnection = true;
                 if (demoStarted) stopDemoMode();
-                showConnectionBanner('Connected to server', 'connected');
             }
+            showConnectionBanner('Overlay connected', 'connected');
         });
 
         socket.on('disconnect', function(reason) {
+            overlayConnected = false;
+            nowPlayingNeedsSync = true;
+            syncControlConnection();
             console.log('⚠️ Disconnected:', reason);
             showConnectionBanner('Disconnected - reconnecting...', 'error');
         });
 
         socket.on('connect_error', function() {
-            if (!hadLiveConnection && !demoStarted) {
+            overlayConnected = false;
+            syncControlConnection();
+            if (!demoStarted) {
                 showConnectionBanner('Connection issue - retrying...', 'error');
             }
         });
+
+        function syncControlConnection() {
+            document.querySelectorAll('.mod-btn, .test-send, #vis-requests, #vis-skip').forEach(function(control) {
+                control.disabled = !socket.connected;
+            });
+        }
+
+        function setModPassword(password) {
+            controlPassword = password || '';
+            try {
+                if (controlPassword) sessionStorage.setItem('modPassword', controlPassword);
+                else sessionStorage.removeItem('modPassword');
+            } catch (error) {}
+        }
+
+        function getModPassword() {
+            return controlPassword;
+        }
+
+        function showControlAuthentication(message) {
+            const prompt = message || 'Enter your control password above and select Unlock before sending test or moderator commands.';
+            document.getElementById('control-auth-status').textContent = prompt;
+            if (CONTROLS_MODE) {
+                document.getElementById('control-auth').scrollIntoView({ block: 'center' });
+                document.getElementById('mod-password').focus({ preventScroll: true });
+            }
+            return prompt;
+        }
+
+        function sendModeratorAction(event, payload, callback) {
+            if (!socket.connected) return callback({ error: 'Disconnected. Reconnect before sending commands.' });
+            if (event !== 'mod_auth' && !(payload && (payload.password || payload.token))) {
+                return callback({ error: showControlAuthentication() });
+            }
+            var completed = false;
+            function finish(response) {
+                if (completed) return;
+                completed = true;
+                clearTimeout(timeout);
+                if (response && response.error === 'unauthorized') {
+                    setModPassword('');
+                    response = { error: showControlAuthentication('Password not accepted. Enter the CONTROL_PASSWORD used to start this server, then select Unlock. If it was changed or not set, restart the server with it configured.') };
+                }
+                callback(response || { error: 'No response from server.' });
+            }
+            var timeout = setTimeout(function() {
+                finish({ error: 'No confirmation received. Check live state before retrying.' });
+            }, 5000);
+            socket.volatile.emit(event, payload, finish);
+        }
+
+        syncControlConnection();
 
         socket.on('update_queue', function(data) { renderQueue(data); });
 
@@ -1674,40 +1810,38 @@
             var visibility = { requests: false, voting: true };
 
             function applyVisibility(state) {
+                visibility = Object.assign({}, visibility, state);
                 var reqPanel = document.querySelector('.requests-panel');
                 var votePanel = document.querySelector('.voting-panel');
-                if (reqPanel && !reqPanel.classList.contains('disabled-by-default')) {
-                    reqPanel.classList.add('disabled-by-default');
-                }
-                if (reqPanel) reqPanel.classList.toggle('hidden-panel', !state.requests);
-                if (votePanel) votePanel.classList.toggle('hidden-panel', !state.voting);
-                visRequests.checked = !!state.requests;
-                visSkip.checked = !!state.voting;
-            }
-
-            function setModPassword(pw) {
-                try { sessionStorage.setItem('modPassword', pw || ''); } catch(e) {}
-            }
-
-            function getModPassword() {
-                try { return sessionStorage.getItem('modPassword') || ''; } catch(e) { return ''; }
+                if (reqPanel) reqPanel.classList.toggle('hidden-panel', !visibility.requests);
+                if (votePanel) votePanel.classList.toggle('hidden-panel', !visibility.voting);
+                visRequests.checked = !!visibility.requests;
+                visSkip.checked = !!visibility.voting;
             }
 
             // Restore saved pw into the input if present
-            try { var saved = getModPassword(); if (saved && pwInput) pwInput.value = saved; } catch(e) {}
+            var saved = getModPassword();
+            if (saved && pwInput) {
+                pwInput.value = saved;
+                document.getElementById('control-auth-status').textContent = 'A password is saved for this tab. Select Unlock to verify it with this server.';
+            }
 
-            function sendVisibility() {
+            function sendVisibility(change) {
                 try {
                     var pw = getModPassword();
-                    var payload = Object.assign({}, visibility, pw ? { password: pw } : {});
-                    socket.emit('set_visibility', payload, function(resp) {
-                        if (resp && resp.error) return showFeedback('Visibility error: ' + resp.error);
+                    var payload = Object.assign({}, change, pw ? { password: pw } : {});
+                    sendModeratorAction('set_visibility', payload, function(resp) {
+                        if (resp.error) {
+                            applyVisibility(visibility);
+                            showFeedback('Visibility error: ' + resp.error);
+                        }
                     });
                 } catch(e) {}
             }
 
             toggle.addEventListener('click', function() {
                 panel.classList.toggle('show');
+                toggle.setAttribute('aria-expanded', String(panel.classList.contains('show')));
             });
 
             function showFeedback(text) {
@@ -1718,13 +1852,37 @@
 
             loginBtn && loginBtn.addEventListener('click', function() {
                 var v = pwInput ? pwInput.value || '' : '';
-                setModPassword(v);
-                showFeedback(v ? 'Password saved' : 'Password cleared');
+                if (!v) return showControlAuthentication('Enter your control password above, then select Unlock.');
+                document.getElementById('control-auth-status').textContent = 'Checking password...';
+                sendModeratorAction('mod_auth', { password: v }, function(resp) {
+                    if (resp.error) {
+                        document.getElementById('control-auth-status').textContent = resp.error;
+                        return showFeedback('Could not unlock: ' + resp.error);
+                    }
+                    if (pwInput.value !== v) return;
+                    setModPassword(v);
+                    document.getElementById('control-auth-status').textContent = 'Controls unlocked for this tab. You can now use Test chat and moderator controls.';
+                    showFeedback('Controls unlocked for this tab.');
+                });
             });
+            document.getElementById('mod-logout').addEventListener('click', function() {
+                setModPassword('');
+                pwInput.value = '';
+                document.getElementById('control-auth-status').textContent = 'Locked. Enter your password and select Unlock before sending test commands.';
+                showFeedback('Controls locked.');
+            });
+            pwInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter') loginBtn.click();
+            });
+            if (CONTROLS_MODE) {
+                panel.classList.add('show');
+                toggle.setAttribute('aria-expanded', 'true');
+            }
 
             clearBtn.addEventListener('click', function() {
+                if (!window.confirm('Clear all local song requests? This does not clear the Spotify queue.')) return;
                 var pw = getModPassword();
-                socket.emit('mod_clear', pw ? { password: pw } : {}, function(resp) {
+                sendModeratorAction('mod_clear', pw ? { password: pw } : {}, function(resp) {
                     if (resp && resp.error) return showFeedback('Error: ' + resp.error);
                     showFeedback('Queue cleared');
                 });
@@ -1732,7 +1890,7 @@
 
             resetBtn.addEventListener('click', function() {
                 var pw = getModPassword();
-                socket.emit('mod_reset', pw ? { password: pw } : {}, function(resp) {
+                sendModeratorAction('mod_reset', pw ? { password: pw } : {}, function(resp) {
                     if (resp && resp.error) return showFeedback('Error: ' + resp.error);
                     showFeedback('Skip votes reset');
                 });
@@ -1741,10 +1899,11 @@
             function sendThreshold(value) {
                 var v = String(value || '').trim();
                 if (!v) return showFeedback('Enter number or auto');
+                if (v.toLowerCase() !== 'auto' && (!/^\d+$/.test(v) || Number(v) < 1 || Number(v) > 200)) return showFeedback('Use a whole number from 1 to 200, or auto.');
                 var pw = getModPassword();
                 var payload = { threshold: v };
                 if (pw) payload.password = pw;
-                socket.emit('mod_set_threshold', payload, function(resp) {
+                sendModeratorAction('mod_set_threshold', payload, function(resp) {
                     if (resp && resp.error) return showFeedback('Error: ' + resp.error);
                     if (resp && resp.threshold !== undefined) {
                         showFeedback('Threshold ' + resp.threshold + ' (' + (resp.mode || 'auto') + ')');
@@ -1769,15 +1928,11 @@
             });
 
             visRequests.addEventListener('change', function() {
-                visibility.requests = visRequests.checked;
-                applyVisibility(visibility);
-                sendVisibility();
+                sendVisibility({ requests: visRequests.checked });
             });
 
             visSkip.addEventListener('change', function() {
-                visibility.voting = visSkip.checked;
-                applyVisibility(visibility);
-                sendVisibility();
+                sendVisibility({ voting: visSkip.checked });
             });
 
             window.applyVisibility = applyVisibility;
@@ -1795,14 +1950,19 @@
             var tFeedback = document.getElementById('test-feedback');
 
             if (!tToggle || !tPanel) return;
+            document.getElementById('test-unlock').addEventListener('click', function() {
+                showControlAuthentication(getModPassword() ? 'This tab has a saved password. Select Unlock to verify it again, or Lock to forget it.' : undefined);
+            });
 
             // restore state
             try {
                 if (localStorage.getItem('testPanelOpen') === '1') tPanel.classList.add('show');
             } catch(e) {}
+            tToggle.setAttribute('aria-expanded', String(tPanel.classList.contains('show')));
 
             tToggle.addEventListener('click', function() {
                 tPanel.classList.toggle('show');
+                tToggle.setAttribute('aria-expanded', String(tPanel.classList.contains('show')));
                 try { localStorage.setItem('testPanelOpen', tPanel.classList.contains('show') ? '1' : '0'); } catch(e) {}
             });
 
@@ -1819,10 +1979,10 @@
                 if (!message) return showTestFeedback('Enter a message');
 
                 try {
-                    var pw = (function(){ try { return sessionStorage.getItem('modPassword') || ''; } catch(e){ return ''; } })();
+                    var pw = getModPassword();
                     var payload = { nickname: name, unique_id: name.toLowerCase(), message: message, is_moderator: isMod };
                     if (pw) payload.password = pw;
-                    socket.emit('simulate_comment', payload, function(resp) {
+                    sendModeratorAction('simulate_comment', payload, function(resp) {
                         if (resp && resp.error) {
                             showTestFeedback('Error: ' + resp.error);
                         } else {

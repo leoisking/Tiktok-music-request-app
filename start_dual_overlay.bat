@@ -30,13 +30,6 @@ echo   Dual Overlay Starter (Cloudflare)
 echo ========================================
 echo.
 
-echo [CLEANUP] Stopping old server processes on port %PORT%...
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"') do (
-    taskkill /PID %%P /F >nul 2>nul
-)
-taskkill /FI "WINDOWTITLE eq %WIDGET_WINDOW_TITLE%" /F >nul 2>nul
-timeout /t 1 /nobreak >nul
-
 where cloudflared >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] cloudflared not found.
@@ -54,6 +47,16 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+call :configure_control_password
+if errorlevel 1 exit /b 1
+
+echo [CLEANUP] Stopping old server processes on port %PORT%...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%PORT% .*LISTENING"') do (
+    taskkill /PID %%P /F >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq %WIDGET_WINDOW_TITLE%" /F >nul 2>nul
+timeout /t 1 /nobreak >nul
 
 REM --- FIX 1: Prompt for CHAT_SOURCE using a dedicated label block ---
 if not "%CHAT_SOURCE%"=="" goto :chat_source_set
@@ -190,12 +193,10 @@ if errorlevel 1 (
 
 echo.
 echo [START] Starting Cloudflare tunnel...
-echo [INFO] Waiting for tunnel URL...
+echo [INFO] The skip and queue HTTPS pages will open automatically when ready.
 echo.
 
-if exist "%URLS_FILE%" del /q "%URLS_FILE%" >nul 2>nul
-set "CF_PS_CMD=$url=''; $urlFile='%URLS_FILE%'; & cloudflared tunnel --url 'http://127.0.0.1:%PORT%' 2>&1 | ForEach-Object { $line=[string]$_; Write-Host $line; if (-not $url) { $m=[regex]::Match($line,'https://[a-z0-9-]+\.trycloudflare\.com'); if($m.Success){ $url=$m.Value.TrimEnd('/'); Write-Host ''; Write-Host '========================================'; Write-Host '  COPY THESE URLs'; Write-Host '========================================'; Write-Host ('Main Overlay : ' + $url + '/'); Write-Host ('Queue Overlay: ' + $url + '/queue_widget'); Write-Host '========================================'; Write-Host ''; Set-Content -Path $urlFile -Value ('Main Overlay : ' + $url + '/'); Add-Content -Path $urlFile -Value ('Queue Overlay: ' + $url + '/queue_widget'); Write-Host ('[INFO] Saved to: ' + $urlFile); Write-Host ''; } } }"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "%CF_PS_CMD%"
+python "%~dp0_launch_overlay_tunnel.py" --port "%PORT%" --urls-file "%URLS_FILE%"
 
 echo.
 echo ========================================
@@ -206,4 +207,31 @@ taskkill /FI "WINDOWTITLE eq %WIDGET_WINDOW_TITLE%" /F >nul 2>nul
 echo [DONE] Services stopped.
 echo.
 pause
+exit /b 0
+
+:configure_control_password
+echo.
+echo ========================================
+echo   Control Panel Password Setup
+echo ========================================
+echo Choose your own long, unique password for this launch.
+echo Use the same password in the control panel's Unlock controls box.
+echo Typing is visible in this window. Keep it off your stream.
+if defined CONTROL_PASSWORD (
+    echo A password is already configured. Press Enter to keep it,
+    echo or type a new password if you do not know the existing one.
+) else (
+    echo No password is configured yet. You must choose one to continue.
+)
+
+:read_control_password
+set /p "CONTROL_PASSWORD=Control password: "
+python -c "import os; password = os.getenv('CONTROL_PASSWORD', ''); raise SystemExit(0 if password.strip() and len(password) <= 1024 and password not in ('your_password', 'your_secure_pass', 'YourSecurePassword') else 1)"
+if errorlevel 1 (
+    echo [ERROR] Enter a nonblank password of up to 1024 characters. Do not use a placeholder password.
+    goto :read_control_password
+)
+echo [OK] Control password configured for this launch. It is not saved to a file.
+echo [INFO] Control panel: http://127.0.0.1:%PORT%/control
+echo.
 exit /b 0

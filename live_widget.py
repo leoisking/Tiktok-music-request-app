@@ -10,7 +10,11 @@ import random
 import base64
 import json
 import math
-from collections import Counter
+import hashlib
+import secrets
+import ssl
+from collections import Counter, OrderedDict
+from functools import wraps
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -46,18 +50,20 @@ def _env_float(name, default, minimum=None):
         value = float(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         value = float(default)
+    if not math.isfinite(value):
+        value = float(default)
     if minimum is not None:
         value = max(minimum, value)
     return value
 
 # Configuration
 CHAT_SOURCE = os.getenv("CHAT_SOURCE", "tiktok").strip().lower()
-TIKTOK_USER = os.getenv("TIKTOK_USER", "midlifedisaster69").strip()
+TIKTOK_USER = os.getenv("TIKTOK_USER", "").strip()
 TWITCH_CHANNEL = os.getenv("TWITCH_CHANNEL", "").strip().lower().lstrip("#")
 TWITCH_BOT_USERNAME = os.getenv("TWITCH_BOT_USERNAME", "").strip()
 TWITCH_OAUTH_TOKEN = os.getenv("TWITCH_OAUTH_TOKEN", "").strip()
 TWITCH_HOST = os.getenv("TWITCH_HOST", "irc.chat.twitch.tv").strip()
-TWITCH_PORT = _env_int("TWITCH_PORT", 6667, minimum=1)
+TWITCH_PORT = _env_int("TWITCH_PORT", 6697, minimum=1)
 TWITCH_RECONNECT_DELAY_SEC = _env_float("TWITCH_RECONNECT_DELAY_SEC", 6.0, minimum=1.0)
 SKIP_THRESHOLD = _env_int("SKIP_THRESHOLD", 10, minimum=1)
 ADAPTIVE_SKIP_THRESHOLD_ENABLED = os.getenv("ADAPTIVE_SKIP_THRESHOLD_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -80,7 +86,14 @@ if ADAPTIVE_SKIP_MIN > ADAPTIVE_SKIP_MAX:
     ADAPTIVE_SKIP_MIN, ADAPTIVE_SKIP_MAX = ADAPTIVE_SKIP_MAX, ADAPTIVE_SKIP_MIN
 if ADAPTIVE_SKIP_VIEWER_MID_MAX < ADAPTIVE_SKIP_VIEWER_LOW_MAX:
     ADAPTIVE_SKIP_VIEWER_MID_MAX = ADAPTIVE_SKIP_VIEWER_LOW_MAX
-CONTROL_PASSWORD = os.getenv("CONTROL_PASSWORD", "your_password")
+CONTROL_PASSWORD = os.getenv("CONTROL_PASSWORD", "")
+if CONTROL_PASSWORD in ("your_password", "your_secure_pass", "YourSecurePassword"):
+    CONTROL_PASSWORD = ""
+HOST = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
+PORT = _env_int("PORT", 5000, minimum=1)
+ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+if "*" in ALLOWED_ORIGINS:
+    raise ValueError("ALLOWED_ORIGINS must contain exact origins, not '*'. Leave it unset for same-origin overlays.")
 MOD_LIST = [m.strip() for m in os.getenv("MOD_LIST", "").split(",") if m.strip()]
 MAX_QUEUE_SIZE = _env_int("MAX_QUEUE_SIZE", 200, minimum=10)
 MAX_MESSAGE_LEN = _env_int("MAX_MESSAGE_LEN", 280, minimum=20)
@@ -112,8 +125,14 @@ REQUEST_DUPLICATE_WINDOW_SEC = _env_float("REQUEST_DUPLICATE_WINDOW_SEC", 120.0,
 CHAT_LOG_ALL_MESSAGES = os.getenv("CHAT_LOG_ALL_MESSAGES", "0").strip().lower() in ("1", "true", "yes", "on")
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config.update(
+    SECRET_KEY=os.getenv("SECRET_KEY") or secrets.token_hex(32),
+    MAX_CONTENT_LENGTH=16 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+)
+socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS or None,
+                    max_http_buffer_size=16 * 1024, async_mode="threading")
 
 
 def _initial_skip_threshold():
@@ -140,7 +159,7 @@ skip_votes = {
     "viewer_source": ""
 }
 voted_users = set()
-visibility_state = {"requests": True, "chat": True, "voting": True}
+visibility_state = {"requests": False, "chat": True, "voting": True}
 now_playing_state = {"title": "", "artist": "", "elapsed": 0, "duration": 0, "playing": False, "available": False, "album_art": ""}
 spotify_queue_state = []
 spotify_queue_status = {
@@ -180,18 +199,75 @@ live_viewer_source = ""
 request_last_by_user = {}
 request_last_song_by_user = {}
 last_request_cache_prune_time = 0.0
+socket_rate_buckets = OrderedDict()
+socket_rate_lock = threading.Lock()
+
+
+def _consume_socket_budget(bucket, key, limit, window=10.0):
+    now_ts = time.monotonic()
+    cache_key = (bucket, key)
+    with socket_rate_lock:
+        started, count = socket_rate_buckets.pop(cache_key, (now_ts, 0))
+        if now_ts - started >= window:
+            started, count = now_ts, 0
+        socket_rate_buckets[cache_key] = (started, count + 1)
+        while len(socket_rate_buckets) > 4096:
+            socket_rate_buckets.popitem(last=False)
+        return count < limit
+
+
+def socket_event_limit(limit=20):
+    def decorate(handler):
+        @wraps(handler)
+        def limited(data=None, *extra):
+            if extra or (data is not None and not isinstance(data, dict)):
+                return {"error": "invalid_payload"}
+            if not _consume_socket_budget(handler.__name__, request.sid, limit):
+                return {"error": "rate_limited"}
+            return handler(data)
+        return limited
+    return decorate
+
+
+def _overlay_response(filename):
+    html_path = os.path.join(app.root_path, filename)
+    with open(html_path, encoding="utf-8") as html_file:
+        html = html_file.read()
+    scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
+    hashes = ["'sha256-" + base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii") + "'"
+              for script in scripts if script.strip()]
+    response = send_file(html_path)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; "
+        "script-src 'self' https://cdnjs.cloudflare.com " + " ".join(hashes) + "; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; "
+        "connect-src 'self' ws: wss:"
+    )
+    response.headers["Cache-Control"] = "no-store"
+    if request.path == '/control' or request.args.get('controls') == '1':
+        response.headers["Content-Security-Policy"] += "; frame-ancestors 'none'"
+        response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
 @app.route('/')
+@app.route('/control')
 def index():
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'index.html')
-    return send_file(html_path)
+    return _overlay_response('index.html')
 
 
 @app.route('/queue_widget')
 def queue_widget():
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'queue_widget.html')
-    return send_file(html_path)
+    return _overlay_response('queue_widget.html')
 
 
 def broadcast_queue():
@@ -1762,44 +1838,31 @@ def start_spotify_queue_poller():
     threading.Thread(target=_runner, daemon=True).start()
 
 def _is_authorized_action(data):
-    """Check if the action is authorized by password or moderator status.
-    
-    Checks for password match in data['password'] or data['token'], or an
-    identity in `data['moderator']`/`data['user']` that matches `MOD_LIST`.
-    For convenience, allow localhost connections (useful for internal control
-    servers running on the same machine).
-    """
+    """Require a configured password, including for local tunnel connections."""
+    if not CONTROL_PASSWORD or not isinstance(data, dict):
+        return False
+    password = data.get('password') or data.get('token')
+    if not isinstance(password, str) or len(password) > 1024:
+        return False
+    if not _consume_socket_budget('authentication', request.remote_addr, 60, window=60.0):
+        return False
     try:
-        # Password-based auth
-        if isinstance(data, dict):
-            pw = data.get('password') or data.get('token')
-            if pw and CONTROL_PASSWORD and str(pw) == CONTROL_PASSWORD:
-                return True
+        return secrets.compare_digest(password.encode('utf-8'), CONTROL_PASSWORD.encode('utf-8'))
+    except UnicodeError:
+        return False
 
-            # Moderator identity
-            moderator = data.get('moderator') or data.get('user')
-            if moderator:
-                try:
-                    if moderator.lower() in MOD_SET:
-                        return True
-                except:
-                    pass
 
-        # Allow localhost (internal) connections
-        remote = None
-        try:
-            remote = request.remote_addr
-        except:
-            remote = None
-        if remote in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
-            return True
-    except:
-        pass
-    return False
+@socketio.on('mod_auth')
+@socket_event_limit()
+def handle_mod_auth(data=None):
+    if not _is_authorized_action(data):
+        return {'error': 'unauthorized'}
+    return {'success': True}
 
 
 # --- SOCKET.IO: moderator handlers for control panel / index.html ---
 @socketio.on('mod_clear')
+@socket_event_limit()
 def handle_mod_clear(data=None):
     """Clear the song queue (triggered by moderator control panel)."""
     global song_queue
@@ -1830,10 +1893,11 @@ def handle_mod_clear(data=None):
             print(f"[MOD_CLEAR] Error clearing queue: {e}")
         except:
             pass
-        return {'error': str(e)}
+        return {'error': 'internal_error'}
 
 
 @socketio.on('set_visibility')
+@socket_event_limit()
 def handle_set_visibility(data):
     """Set panel visibility and broadcast to all clients.
 
@@ -1852,14 +1916,13 @@ def handle_set_visibility(data):
         if not isinstance(data, dict):
             return {'error': 'invalid_payload'}
 
-        # Validate and coerce values
+        fields = ('requests', 'chat', 'voting')
+        if any(key in data and not isinstance(data[key], bool) for key in fields):
+            return {'error': 'invalid_payload'}
         with state_lock:
-            for k in ('requests', 'chat', 'voting'):
-                if k in data:
-                    try:
-                        visibility_state[k] = bool(data.get(k))
-                    except:
-                        pass
+            for key in fields:
+                if key in data:
+                    visibility_state[key] = data[key]
 
         # Broadcast new visibility to all connected clients
         try:
@@ -1876,10 +1939,11 @@ def handle_set_visibility(data):
             print(f"[VISIBILITY] Error: {e}")
         except:
             pass
-        return {'error': str(e)}
+        return {'error': 'internal_error'}
 
 
 @socketio.on('request_state')
+@socket_event_limit(limit=4)
 def handle_request_state(data=None):
     """Send current state (queue, ratings, visibility) to the requester only."""
     try:
@@ -1932,10 +1996,11 @@ def handle_request_state(data=None):
             print(f"[STATE] Error sending state: {e}")
         except:
             pass
-        return {'error': str(e)}
+        return {'error': 'internal_error'}
 
 
 @socketio.on('simulate_comment')
+@socket_event_limit(limit=10)
 def handle_simulate_comment(data):
     """Simulate an incoming chat comment (for offline testing).
 
@@ -1956,9 +2021,17 @@ def handle_simulate_comment(data):
         nickname = data.get('nickname', 'TestUser')
         unique_id = data.get('unique_id', '')
         message = data.get('message', '')
-        is_mod_flag = bool(data.get('is_moderator', False))
+        is_mod_flag = data.get('is_moderator', False)
+        if (not isinstance(nickname, str) or not isinstance(unique_id, str)
+                or not isinstance(message, str) or not isinstance(is_mod_flag, bool)
+                or len(nickname) > 100 or len(unique_id) > 100
+                or not message.strip() or len(message) > MAX_MESSAGE_LEN):
+            return {'error': 'invalid_payload'}
+        nickname = normalize_message(nickname) or 'TestUser'
+        unique_id = normalize_message(unique_id)
+        message = normalize_message(message)
 
-        print(f"ðŸ§ª [SIMULATED] {nickname}: {message} (mod={is_mod_flag})")
+        print(f"[SIMULATED] {nickname}: {message} (mod={is_mod_flag})")
 
         result = process_comment(nickname, unique_id, message, is_moderator=is_mod_flag)
         try:
@@ -1980,10 +2053,11 @@ def handle_simulate_comment(data):
             print(f"[SIMULATED] Error: {e}")
         except:
             pass
-        return {'error': str(e)}
+        return {'error': 'internal_error'}
 
 
 @socketio.on('mod_reset')
+@socket_event_limit()
 def handle_mod_reset(data=None):
     """Reset skip votes (triggered by moderator control panel)."""
     global skip_votes, voted_users
@@ -2013,10 +2087,11 @@ def handle_mod_reset(data=None):
             print(f"[MOD_RESET] Error resetting votes: {e}")
         except:
             pass
-        return {'error': str(e)}
+        return {'error': 'internal_error'}
 
 
 @socketio.on('mod_set_threshold')
+@socket_event_limit()
 def handle_mod_set_threshold(data=None):
     """Set skip threshold from moderator panel (number or 'auto')."""
     sid = None
@@ -2066,62 +2141,73 @@ def handle_mod_set_threshold(data=None):
     }
 
 
-def extract_user(event):
-    """Extract nickname and unique_id from a TikTok comment event.
-    Tries multiple structures to support library/API shape changes."""
-    nickname = "Guest"
-    unique_id = ""
-
+def _event_value(payload, key):
     try:
-        user_dict = {}
+        return payload.get(key) if isinstance(payload, dict) else getattr(payload, key, None)
+    except Exception:
+        return None
 
-        # 1) Primary user objects
-        user_obj = getattr(event, 'user_info', None) or getattr(event, 'user', None)
-        if user_obj:
-            try:
-                d = user_obj.to_pydict()
-                if isinstance(d, dict):
-                    user_dict.update(d)
-            except:
-                pass
-            try:
-                d = user_obj.__dict__
-                if isinstance(d, dict):
-                    user_dict.update(d)
-            except:
-                pass
-            for attr in ['nickname', 'nickName', 'nick_name', 'display_name', 'displayName', 'uniqueId', 'unique_id', 'userId', 'user_id', 'id']:
+
+def _tiktok_user_payloads(event):
+    for key in ('user_info', 'user', 'userInfo'):
+        user = _event_value(event, key)
+        if user is None:
+            continue
+        yield user
+        for method in ('to_pydict', 'to_dict'):
+            convert = _event_value(user, method)
+            if callable(convert):
                 try:
-                    val = getattr(user_obj, attr, None)
-                    if val and str(val).strip() and attr not in user_dict:
-                        user_dict[attr] = val
-                except:
-                    pass
+                    payload = convert()
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    yield payload
 
-        # 2) Event-level fallback payloads (covers edge client/event versions)
-        for payload in [getattr(event, 'raw_data', None), getattr(event, 'as_dict', lambda: None)() if hasattr(event, 'as_dict') else None]:
-            if isinstance(payload, dict):
-                user = payload.get('user') or payload.get('userInfo') or payload.get('user_info')
-                if isinstance(user, dict):
-                    user_dict.update(user)
+    for key in ('raw_data', 'as_dict', 'to_pydict', 'to_dict'):
+        payload = _event_value(event, key)
+        if callable(payload):
+            try:
+                payload = payload()
+            except Exception:
+                continue
+        if isinstance(payload, dict):
+            for user_key in ('user_info', 'user', 'userInfo'):
+                user = payload.get(user_key)
+                if user is not None:
+                    yield user
 
-        # Extract nickname
-        for key in ['nickname', 'nickName', 'nick_name', 'display_name', 'displayName', 'name']:
-            val = user_dict.get(key)
-            if val and str(val).strip():
-                nickname = str(val).strip()
+
+def extract_user(event, *, prefer_stable_id=False):
+    """Read account identities from object or dictionary TikTok event payloads."""
+    nickname = ''
+    unique_id = ''
+    numeric_keys = ('userId', 'user_id', 'id', 'idStr', 'id_str')
+    username_keys = ('uniqueId', 'unique_id', 'username')
+    secure_keys = ('secUid', 'sec_uid')
+    identity_keys = numeric_keys + secure_keys + username_keys if prefer_stable_id else username_keys + secure_keys + numeric_keys
+    for payload in _tiktok_user_payloads(event):
+        if not nickname:
+            for key in ('nickname', 'nickName', 'nick_name', 'display_name', 'displayName', 'name'):
+                value = _event_value(payload, key)
+                if isinstance(value, str) and value.strip():
+                    nickname = value.strip()
+                    break
+        if not unique_id:
+            for key in identity_keys:
+                value = _event_value(payload, key)
+                if isinstance(value, bool) or not isinstance(value, (str, int)):
+                    continue
+                identity = str(value).strip()
+                if not identity or identity == '0':
+                    continue
+                if key in numeric_keys and (not identity.isdecimal() or int(identity) <= 0):
+                    continue
+                unique_id = identity.lower()
                 break
-
-        # Extract unique_id
-        for key in ['uniqueId', 'unique_id', 'secUid', 'sec_uid', 'userId', 'user_id', 'id']:
-            val = user_dict.get(key)
-            if val and str(val).strip():
-                unique_id = str(val).strip().lower()
-                break
-    except:
-        pass
-
-    return nickname, unique_id
+        if nickname and unique_id:
+            break
+    return nickname or 'Guest', unique_id
 def safe_print_name(nickname):
     """Make a name safe for Windows cmd printing."""
     try:
@@ -2139,11 +2225,12 @@ def normalize_message(msg):
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def is_mod(nickname, unique_id):
-    """Check if a user is a moderator."""
-    nick_lower = nickname.lower()
-    uid_lower = unique_id.lower() if unique_id else ""
-    return nick_lower in MOD_SET or (uid_lower in MOD_SET if uid_lower else False)
+def is_mod(nickname, unique_id, source="tiktok"):
+    """Check platform identity, never a viewer-controlled display name."""
+    if not isinstance(unique_id, str) or not unique_id.strip():
+        return False
+    identity = unique_id.strip().lower()
+    return f"{source}:{identity}" in MOD_SET or (source == "tiktok" and identity in MOD_SET)
 
 
 def _normalize_chat_source(value):
@@ -2460,7 +2547,9 @@ def process_chat_message(source, nickname, unique_id, msg, is_moderator=False):
     last_comment_time = now_ts
     comment_count += 1
 
-    key = _chat_user_key(nickname, unique_id)
+    identity = _chat_user_key(nickname, unique_id)
+    unique_id = f"{source}:{identity}" if identity else ""
+    key = unique_id
     if key:
         with state_lock:
             active_chat_users[key] = now_ts
@@ -2486,12 +2575,14 @@ def process_chat_message(source, nickname, unique_id, msg, is_moderator=False):
     if not should_log_chat_line:
         try:
             normalized = normalize_message(msg)
-            should_log_chat_line = bool(re.match(r"^[^A-Za-z0-9]*[!\uFF01]", normalized))
+            should_log_chat_line = bool(re.search(r"(?<![A-Za-z0-9])[!\uFF01]", normalized))
         except Exception:
             should_log_chat_line = False
     if should_log_chat_line:
         try:
             print(f"[{source.upper()}] [{safe_name}]: {msg}")
+            if identity.startswith('nick:'):
+                print('   Account identity missing; using display-name fallback, which can share limits between identical names.')
         except Exception:
             print(f"[{source.upper()}] [User]: (message contained unprintable chars)")
 
@@ -2503,9 +2594,19 @@ def process_chat_message(source, nickname, unique_id, msg, is_moderator=False):
                 broadcast_request_feedback(feedback_payload)
         except Exception:
             pass
-        if result.get('action') not in ('none', 'ignored', 'duplicate_skip'):
+        if should_log_chat_line or result.get('action') not in ('none', 'ignored', 'duplicate_skip'):
             try:
                 print(f"   process_comment result: {result}")
+                explanations = {
+                    'none': 'No supported command matched. Use !skip or !req Song by Artist.',
+                    'duplicate_skip': 'This viewer already voted for the current song.',
+                    'threshold_already_reached': 'The skip threshold has already been reached; waiting for the next song/reset.',
+                }
+                explanation = explanations.get(result.get('action'))
+                if result.get('reason') == 'missing_identity':
+                    explanation = 'TikTok did not provide a usable viewer identity; this vote was not counted.'
+                if explanation:
+                    print(f"   {explanation}")
             except Exception:
                 pass
         return result
@@ -2554,6 +2655,7 @@ def _parse_twitch_privmsg(line):
         nickname = prefix.split("!", 1)[0]
     else:
         nickname = prefix
+    account_name = nickname
 
     tags = _parse_twitch_tags(tags_part)
     user_id = (tags.get("user-id") or "").strip().lower()
@@ -2564,7 +2666,9 @@ def _parse_twitch_privmsg(line):
     is_mod_tag = tags.get("mod") == "1"
     badges = tags.get("badges", "")
     is_broadcaster = "broadcaster/" in badges
-    is_moderator = bool(is_mod_tag or is_broadcaster or is_mod(nickname, user_id))
+    is_moderator = bool(is_mod_tag or is_broadcaster
+                        or is_mod('', user_id, source='twitch')
+                        or is_mod('', account_name, source='twitch'))
     return nickname or "Guest", user_id, message.strip(), is_moderator
 
 
@@ -2582,7 +2686,7 @@ async def twitch_chat_loop():
     while True:
         writer = None
         try:
-            reader, writer = await asyncio.open_connection(TWITCH_HOST, TWITCH_PORT)
+            reader, writer = await asyncio.open_connection(TWITCH_HOST, TWITCH_PORT, ssl=ssl.create_default_context())
 
             if TWITCH_OAUTH_TOKEN and TWITCH_BOT_USERNAME:
                 token = TWITCH_OAUTH_TOKEN
@@ -2664,6 +2768,8 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
             return {'action': 'ignored'}
 
         safe_name = safe_print_name(nickname or 'Guest')
+        nickname = normalize_message(nickname)[:100] or 'Guest'
+        unique_id = normalize_message(unique_id)[:200]
         m = normalize_message(msg)
         if len(m) > MAX_MESSAGE_LEN:
             m = m[:MAX_MESSAGE_LEN]
@@ -2818,6 +2924,8 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
             uid_key = (unique_id or '').strip().lower()
             nick_key = (nickname or '').strip().lower()
             key = uid_key or (nick_key if nick_key and nick_key != 'guest' else None)
+            if not key:
+                return {'action': 'ignored', 'reason': 'missing_identity'}
 
             with state_lock:
                 if skip_votes.get('reached'):
@@ -2862,6 +2970,7 @@ def create_client_and_connect():
         try:
             # Extract user info
             nickname, unique_id = extract_user(event)
+            _, voter_id = extract_user(event, prefer_stable_id=True)
             
             # Extract message
             try:
@@ -2871,7 +2980,10 @@ def create_client_and_connect():
             
             if not msg:
                 return
-            process_chat_message("tiktok", nickname, unique_id, msg, is_moderator=is_mod(nickname, unique_id))
+            process_chat_message(
+                "tiktok", nickname, voter_id, msg,
+                is_moderator=is_mod(nickname, unique_id) or is_mod(nickname, voter_id),
+            )
 
         except Exception as e:
             try:
@@ -2902,7 +3014,8 @@ async def main():
     threading.Thread(
         target=lambda: socketio.run(
             app,
-            port=5000,
+            host=HOST,
+            port=PORT,
             allow_unsafe_werkzeug=True,
             log_output=False,
             use_reloader=False
@@ -2940,19 +3053,19 @@ async def main():
         print("          Bootstrap tracks queue head only; explicit !req tracking is full-length.")
         print(f"          Head fallback limit while tracked: {SPOTIFY_MANUAL_QUEUE_HEAD_FALLBACK_LIMIT}")
     
-    print("â•" * 55)
-    print("  âš¡ MIDLIFE DISASTER â€” COMBINED LIVE WIDGET âš¡")
-    print("â•" * 55)
-    print(f"  ðŸš€ Server LIVE at http://127.0.0.1:5000")
+    print("=" * 55)
+    print("  MIDLIFE DISASTER - COMBINED LIVE WIDGET")
+    print("=" * 55)
+    print("  Server LIVE at http://127.0.0.1:5000")
     if ADAPTIVE_SKIP_THRESHOLD_ENABLED:
         print(
-            f"  ðŸ“‹ Skip threshold: adaptive "
+            f"  Skip threshold: adaptive "
             f"(min={ADAPTIVE_SKIP_MIN}, max={ADAPTIVE_SKIP_MAX}, ratio={ADAPTIVE_SKIP_RATIO:.3f}, "
             f"window={ADAPTIVE_SKIP_ACTIVE_WINDOW_SEC}s)"
         )
         if ADAPTIVE_SKIP_USE_VIEWER_COUNT:
             print(
-                f"  ðŸ“‹ Adaptive viewer assist: ON "
+                f"  Adaptive viewer assist: ON "
                 f"(viewer_ratio={ADAPTIVE_SKIP_VIEWER_RATIO:.3f}, stale={ADAPTIVE_SKIP_VIEWER_STALE_SEC:.0f}s, "
                 f"min_chat={ADAPTIVE_SKIP_VIEWER_MIN_ACTIVE_CHAT}, sanity_x={ADAPTIVE_SKIP_VIEWER_CHAT_SANITY_MULT:.0f})"
             )
@@ -2962,34 +3075,34 @@ async def main():
                 f"{ADAPTIVE_SKIP_VIEWER_MID_MAX + 1}+ -> max({ADAPTIVE_SKIP_VIEWER_HIGH_MIN}, viewers*{ADAPTIVE_SKIP_VIEWER_RATIO:.2f})"
             )
         else:
-            print("  ðŸ“‹ Adaptive viewer assist: OFF (chat-activity only)")
+            print("  Adaptive viewer assist: OFF (chat-activity only)")
     else:
-        print(f"  ðŸ“‹ Skip threshold: fixed {SKIP_THRESHOLD} votes")
-    print(f"  ðŸ“‹ Auto next on threshold: {'ON' if AUTO_NEXT_ON_THRESHOLD else 'OFF'}")
-    print(f"  ðŸ“‹ Spotify track watcher: {'ON' if SPOTIFY_TRACK_WATCHER_ENABLED else 'OFF'}")
-    print(f"  ðŸ“‹ Spotify queue poll interval: {SPOTIFY_QUEUE_POLL_SEC:.2f}s")
-    print(f"  ðŸ“‹ Chat source: {selected_source}")
-    print(f"  ðŸ“‹ Request cooldown: {REQUEST_COOLDOWN_SEC:.1f}s")
-    print(f"  ðŸ“‹ Request duplicate window: {REQUEST_DUPLICATE_WINDOW_SEC:.1f}s")
-    print(f"  ðŸ“‹ Verbose chat logging: {'ON' if CHAT_LOG_ALL_MESSAGES else 'OFF'}")
+        print(f"  Skip threshold: fixed {SKIP_THRESHOLD} votes")
+    print(f"  Auto next on threshold: {'ON' if AUTO_NEXT_ON_THRESHOLD else 'OFF'}")
+    print(f"  Spotify track watcher: {'ON' if SPOTIFY_TRACK_WATCHER_ENABLED else 'OFF'}")
+    print(f"  Spotify queue poll interval: {SPOTIFY_QUEUE_POLL_SEC:.2f}s")
+    print(f"  Chat source: {selected_source}")
+    print(f"  Request cooldown: {REQUEST_COOLDOWN_SEC:.1f}s")
+    print(f"  Request duplicate window: {REQUEST_DUPLICATE_WINDOW_SEC:.1f}s")
+    print(f"  Verbose chat logging: {'ON' if CHAT_LOG_ALL_MESSAGES else 'OFF'}")
     if selected_source in ("tiktok", "both"):
-        print(f"  ðŸ“‹ TikTok user: @{TIKTOK_USER}")
+        print(f"  TikTok user: @{TIKTOK_USER}")
     if selected_source in ("twitch", "both"):
-        print(f"  ðŸ“‹ Twitch channel: #{TWITCH_CHANNEL}")
-    print("  ðŸ“‹ Commands:")
-    print("     !req song by artist  â†’ request a song")
-    print("     !skip                â†’ vote to skip current song")
-    print("     !clear               â†’ clear requests (mods)")
-    print("     !reset / !next       â†’ reset skip votes (mods)")
-    print("     !threshold <n>       â†’ set skip threshold live (mods)")
-    print("     !threshold auto      â†’ return to adaptive/fixed mode (mods)")
-    print("â•" * 55)
-    print("  âš ï¸  Waiting for live chat connection...")
-    print("â•" * 55)
+        print(f"  Twitch channel: #{TWITCH_CHANNEL}")
+    print("  Commands:")
+    print("     !req song by artist  -> request a song")
+    print("     !skip                -> vote to skip current song")
+    print("     !clear               -> clear requests (mods)")
+    print("     !reset / !next       -> reset skip votes (mods)")
+    print("     !threshold <n>       -> set skip threshold live (mods)")
+    print("     !threshold auto      -> return to adaptive/fixed mode (mods)")
+    print("=" * 55)
+    print("  Waiting for live chat connection...")
+    print("=" * 55)
     print()
-    if CONTROL_PASSWORD == "your_password":
-        print("  [WARN] CONTROL_PASSWORD is using the default value.")
-        print("         Set CONTROL_PASSWORD for secure moderator actions.")
+    if not CONTROL_PASSWORD:
+        print("  [WARN] Browser controls are disabled until CONTROL_PASSWORD is set.")
+        print("         Use a strong, unique password, then open /control.")
         print()
     if SPOTIFY_QUEUE_ON_REQUEST and not _spotify_auth_ready():
         print("  [WARN] Spotify auto-queue is enabled but API credentials are missing.")
@@ -3007,6 +3120,11 @@ async def main():
     attempt = 0
     consecutive_failures = 0
 
+    def on_connected():
+        nonlocal consecutive_failures
+        consecutive_failures = 0
+        print(f"[TIKTOK] Connected to @{TIKTOK_USER}. Listening for chat commands...")
+
     while True:
         attempt += 1
         try:
@@ -3014,12 +3132,8 @@ async def main():
             print(f"[TIKTOK] Connection attempt #{attempt}...")
             live_client = create_client_and_connect()
 
-            print(f"[TIKTOK] Connected to TikTok Live! (@{TIKTOK_USER})")
-            print("         Listening for chat commands...")
-            print()
+            await live_client.connect(callback=on_connected)
             consecutive_failures = 0
-
-            await live_client.connect()
 
             # If connect() returns normally, the stream ended.
             print("[TIKTOK] Stream ended or connection closed.")

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="referrer" content="no-referrer">
     <title>Queue Widget</title>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Montserrat:wght@500;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -317,10 +318,17 @@
                 padding: 7px 11px;
             }
         }
+        .connection-status { padding: 8px 12px; border-radius: 10px; background: #492f13; color: #ffe1a6; font-size: 13px; font-weight: 700; }
+        .connection-status[hidden] { display: none; }
+        .request-hint { padding-top: 10px; font-size: 13px; line-height: 1.5; color: #d4dbe5; text-align: center; }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+        }
     </style>
 </head>
 <body>
     <div class="widget">
+        <div class="connection-status" id="connection-status" role="status" aria-live="polite">Connecting to overlay server...</div>
         <section class="panel now">
             <div class="now-wrap">
                 <img class="now-art no-art" id="now-art" alt="">
@@ -341,10 +349,11 @@
                 <div class="title">Up Next</div>
                 <div class="count" id="queue-count">0 queued</div>
             </div>
-            <div class="status" id="queue-status">Waiting for queue sync...</div>
-            <div class="queue-list" id="queue-list">
+            <div class="status" id="queue-status" role="status" aria-live="polite">Waiting for queue sync...</div>
+            <div class="queue-list" id="queue-list" role="list" aria-label="Upcoming songs">
                 <div class="empty">No queued songs yet</div>
             </div>
+            <div class="request-hint">Request: <strong>!req Song by Artist</strong> · Vote: <strong>!skip</strong></div>
         </section>
     </div>
     <div class="request-toast" id="request-toast" role="status" aria-live="polite">
@@ -362,7 +371,9 @@
         let requestQueueItems = [];
         let spotifyQueueItems = [];
         let queueItems = [];
-        const QUEUE_SOURCE_MODE = String(PAGE_PARAMS.get('queue_source') || 'spotify').trim().toLowerCase();
+        let overlayConnected = false;
+        let nowPlayingNeedsSync = true;
+        const QUEUE_SOURCE_MODE = String(PAGE_PARAMS.get('queue_source') || 'auto').trim().toLowerCase();
         const FORCE_SPOTIFY_SOURCE = QUEUE_SOURCE_MODE === 'spotify';
         const AUTO_SOURCE_MODE = QUEUE_SOURCE_MODE === 'auto';
         let usingSpotifyQueue = FORCE_SPOTIFY_SOURCE;
@@ -444,6 +455,7 @@
 
         function currentElapsedSec() {
             if (!nowPlaying || !nowPlaying.available) return 0;
+            if (!overlayConnected || nowPlayingNeedsSync) return nowDisplayedElapsed;
             let elapsedCandidate = nowPlaying.playing
                 ? ((Date.now() - nowAnchorMs) / 1000)
                 : nowPlaying.elapsed;
@@ -488,7 +500,8 @@
             const song = String(payload.song || 'request');
 
             if (status === 'accepted') {
-                showRequestToast('Added: ' + song + ' (' + user + ')', 'accepted');
+                const destination = payload.spotify_queued ? 'Queued on Spotify: ' : 'Request saved: ';
+                showRequestToast(destination + song + ' (' + user + ')', 'accepted');
                 return;
             }
 
@@ -684,8 +697,7 @@
                 queueItems = Array.isArray(spotifyQueueItems) ? spotifyQueueItems : [];
             } else if (AUTO_SOURCE_MODE) {
                 const spotifyReady = !!(spotifyQueueStatus && spotifyQueueStatus.auth_ready);
-                const hasSpotifyItems = Array.isArray(spotifyQueueItems) && spotifyQueueItems.length > 0;
-                usingSpotifyQueue = spotifyReady && hasSpotifyItems;
+                usingSpotifyQueue = spotifyReady;
                 queueItems = usingSpotifyQueue
                     ? spotifyQueueItems
                     : (Array.isArray(requestQueueItems) ? requestQueueItems : []);
@@ -710,7 +722,13 @@
                 const manualOnly = !!(spotifyQueueStatus && spotifyQueueStatus.manual_only);
                 const manualPending = Math.max(0, Number((spotifyQueueStatus && spotifyQueueStatus.manual_pending) || 0));
                 const manualMode = String((spotifyQueueStatus && spotifyQueueStatus.manual_mode) || 'tracked').toLowerCase();
-                if (!FORCE_SPOTIFY_SOURCE && !AUTO_SOURCE_MODE) {
+                if (!overlayConnected) {
+                    status.textContent = 'Connection lost. Showing the last known queue.';
+                } else if ((FORCE_SPOTIFY_SOURCE || usingSpotifyQueue) && spotifyQueueStatus.last_error) {
+                    status.textContent = 'Spotify sync unavailable. Showing the last known queue.';
+                } else if (FORCE_SPOTIFY_SOURCE && !spotifyQueueStatus.auth_ready) {
+                    status.textContent = 'Spotify is not configured. Use queue_source=auto for local requests.';
+                } else if (!FORCE_SPOTIFY_SOURCE && !AUTO_SOURCE_MODE) {
                     status.textContent = 'Source: Request queue';
                 } else if (usingSpotifyQueue) {
                     if (manualOnly) {
@@ -719,16 +737,8 @@
                     } else {
                         status.textContent = 'Source: Spotify queue';
                     }
-                } else if (FORCE_SPOTIFY_SOURCE && spotifyQueueStatus.last_error) {
-                    status.textContent = 'Spotify queue sync error: ' + spotifyQueueStatus.last_error;
-                } else if (FORCE_SPOTIFY_SOURCE && !spotifyQueueStatus.auth_ready) {
-                    status.textContent = 'Spotify queue unavailable: missing API credentials.';
-                } else if (FORCE_SPOTIFY_SOURCE && manualOnly) {
-                    status.textContent = 'Source: Spotify queue (manual only, no tracked items yet)';
-                } else if (AUTO_SOURCE_MODE && spotifyQueueStatus.auth_ready) {
-                    status.textContent = 'Source: Request queue (Spotify queue empty)';
                 } else {
-                    status.textContent = 'Source: Request queue';
+                    status.textContent = 'Viewer requests · Spotify playback is not connected';
                 }
             }
             if (!queueChanged) {
@@ -755,6 +765,7 @@
 
                 const div = document.createElement('div');
                 div.className = 'queue-item';
+                div.setAttribute('role', 'listitem');
 
                 const artDiv = document.createElement('div');
                 if (p.album_art) {
@@ -765,6 +776,10 @@
                     img.loading = 'lazy';
                     img.decoding = 'async';
                     img.referrerPolicy = 'no-referrer';
+                    img.addEventListener('error', function() {
+                        img.hidden = true;
+                        artDiv.className = 'art';
+                    }, { once: true });
                     artDiv.appendChild(img);
                 } else {
                     artDiv.className = 'art';
@@ -865,20 +880,17 @@
             const elapsed = currentElapsedSec();
             const duration = Math.max(0, nowPlaying.duration || 0);
             const barWidth = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
-            const art = String(nowPlaying.album_art || '').trim();
+            const art = String(nowPlaying.album_art || '').trim() || FALLBACK_NOW_ART;
 
             const elapsedRounded = Math.floor(elapsed);
             if (label !== lastTitle || elapsedRounded !== lastElapsed || duration !== lastDuration || nowPlaying.playing !== lastPlaying || art !== lastArt) {
                 nowTrackEl.textContent = label;
                 nowTimeEl.textContent = fmt(elapsedRounded) + ' / ' + fmt(duration);
-                nowStateEl.textContent = nowPlaying.playing ? 'Playing' : 'Paused';
+                nowStateEl.textContent = overlayConnected ? (nowPlaying.playing ? 'Playing' : 'Paused') : 'Reconnecting';
                 nowBarEl.style.width = barWidth + '%';
-                if (art) {
-                    nowArtEl.classList.remove('no-art');
+                if (art !== lastArt) {
+                    nowArtEl.classList.toggle('no-art', art === FALLBACK_NOW_ART);
                     nowArtEl.src = art;
-                } else {
-                    nowArtEl.classList.add('no-art');
-                    nowArtEl.src = FALLBACK_NOW_ART;
                 }
                 lastTitle = label;
                 lastElapsed = elapsedRounded;
@@ -911,7 +923,7 @@
 
             const key = (incoming.title + '|' + incoming.artist).toLowerCase();
             const nowMs = Date.now();
-            if (!nowKey || key !== nowKey) {
+            if (nowPlayingNeedsSync || !nowKey || key !== nowKey || (nowPlaying && !nowPlaying.playing && incoming.playing)) {
                 nowAnchorMs = nowMs - (incoming.elapsed * 1000);
                 nowDisplayedElapsed = incoming.elapsed;
                 nowKey = key;
@@ -935,7 +947,8 @@
             }
 
             nowPlaying = incoming;
-            if (incoming.playing && isVisible) {
+            nowPlayingNeedsSync = false;
+            if (incoming.playing && isVisible && overlayConnected) {
                 startAnimation();
             } else {
                 stopAnimation();
@@ -952,8 +965,24 @@
         });
 
         socket.on('connect', function() {
+            overlayConnected = true;
+            document.getElementById('connection-status').hidden = true;
+            renderQueue();
             try { socket.emit('request_state'); } catch (e) {}
         });
+        function handleDisconnect() {
+            overlayConnected = false;
+            nowPlayingNeedsSync = true;
+            const status = document.getElementById('connection-status');
+            status.textContent = 'Reconnecting… Queue and playback times may be out of date.';
+            status.hidden = false;
+            nowStateEl.textContent = 'Reconnecting';
+            stopAnimation();
+            stopQueueAutoScroll();
+            renderQueue();
+        }
+        socket.on('disconnect', handleDisconnect);
+        socket.on('connect_error', handleDisconnect);
         socket.on('update_now_playing', handleNow);
         socket.on('update_spotify_queue', function(data) {
             if (!Array.isArray(data)) return;
@@ -973,6 +1002,11 @@
 
         // Initialize
         cacheElements();
+        nowArtEl.addEventListener('error', function() {
+            nowArtEl.classList.add('no-art');
+            if (nowArtEl.getAttribute('src') !== FALLBACK_NOW_ART) nowArtEl.src = FALLBACK_NOW_ART;
+        });
+        renderNow();
         if (!etaTickerId) {
             etaTickerId = setInterval(() => {
                 if (isVisible) refreshQueueEtaLabels();
@@ -980,7 +1014,7 @@
         }
         document.addEventListener('visibilitychange', () => {
             isVisible = !document.hidden;
-            if (isVisible && nowPlaying && nowPlaying.playing) {
+            if (isVisible && overlayConnected && nowPlaying && nowPlaying.playing) {
                 startAnimation();
             } else {
                 stopAnimation();

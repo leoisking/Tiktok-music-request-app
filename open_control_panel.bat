@@ -20,7 +20,6 @@ echo.
 set /p CHOICE="Enter your choice (1-3): "
 
 set CONTROL_URL=
-set PASSWORD=
 
 if "%CHOICE%"=="1" (
     set CONTROL_URL=http://localhost:5000/control
@@ -63,24 +62,6 @@ if "%CHOICE%"=="1" (
     exit /b 1
 )
 
-REM Ask for password if needed
-echo.
-set /p NEED_PASSWORD="Do you need a password for authentication? (y/n): "
-
-if /i "!NEED_PASSWORD!"=="y" (
-    set /p PASSWORD="Enter password: "
-)
-
-REM Build the full URL with password parameter if provided
-if not "!PASSWORD!"=="" (
-    echo !CONTROL_URL! | findstr "?" >nul
-    if errorlevel 1 (
-        set CONTROL_URL=!CONTROL_URL!?password=!PASSWORD!
-    ) else (
-        set CONTROL_URL=!CONTROL_URL!^&password=!PASSWORD!
-    )
-)
-
 echo.
 echo ========================================
 echo   Opening Control Panel
@@ -89,11 +70,8 @@ echo.
 echo URL: !CONTROL_URL!
 echo.
 
-if not "!PASSWORD!"=="" (
-    echo Password: ***
-) else (
-    echo Password: Not set
-)
+echo Enter your control password on the page, then select Unlock.
+echo Never include passwords in URLs.
 
 echo.
 echo Opening in default browser...

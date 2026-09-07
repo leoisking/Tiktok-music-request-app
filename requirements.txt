@@ -1,0 +1,4 @@
+Flask==3.1.2
+Flask-SocketIO==5.6.0
+TikTokLive==6.6.5
+winsdk==1.0.0b10
