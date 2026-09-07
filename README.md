@@ -1,3 +1,6 @@
+Note: If Windows shows a SmartScreen warning, click More info → Run anyway. This is expected for unsigned open-source apps.
+
+
 # Live Widget
 
 Live Widget is a real-time song-request and skip-voting overlay for TikTok Live and Twitch. It includes transparent OBS/TikTok Studio overlays, a password-protected control panel, optional Spotify queue integration, and a standalone Windows launcher.
