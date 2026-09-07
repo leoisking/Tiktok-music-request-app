@@ -1,0 +1,1863 @@
+<!DOCTYPE html>
+<!--
+    ╔═══════════════════════════════════════════════════════════╗
+    ║       MIDLIFE DISASTER — COMBINED LIVE WIDGET             ║
+    ║                                                           ║
+    ║  SETUP:                                                   ║
+    ║  1. python live_widget.py                                 ║
+    ║  2. cloudflared tunnel --url http://localhost:5000         ║
+    ║  3. Paste the URL in TikTok Studio overlay                ║
+    ║                                                           ║
+    ║  COMMANDS:                                                ║
+    ║  • !req song name by artist — request a song              ║
+    ║  • Type "!skip" — vote to skip current song               ║
+    ║  • !clear — clear requests (mods only)                    ║
+    ║  • !reset / !next — reset skip votes (mods only)          ║
+    ╚═══════════════════════════════════════════════════════════╝
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' ws: wss:; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>Midlife Disaster — Live Widget</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html.transparent-bg, html.transparent-bg body {
+            background: transparent !important;
+        }
+
+        body, html {
+            background: #000 !important;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            font-family: 'Montserrat', sans-serif;
+            line-height: 1.2;
+        }
+
+        /* ═══ PARTICLES ═══ */
+        .bg-particles {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none; z-index: 0;
+        }
+        .particle {
+            position: absolute; background: white; border-radius: 50%;
+            opacity: 0; animation: floatUp linear infinite;
+        }
+        @keyframes floatUp {
+            0% { opacity: 0; transform: translateY(100vh) scale(0); }
+            10% { opacity: 0.3; } 90% { opacity: 0.1; }
+            100% { opacity: 0; transform: translateY(-10vh) scale(1); }
+        }
+
+        /* ═══ MAIN LAYOUT — VERTICAL STACK ═══ */
+        .widget-wrapper {
+            position: relative; z-index: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 8px;
+            padding-left: calc(8px + env(safe-area-inset-left, 0px));
+            padding-right: calc(8px + env(safe-area-inset-right, 0px));
+            padding-top: calc(8px + env(safe-area-inset-top, 0px));
+            padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+            width: 100%; height: 100vh;
+            min-height: 400px;
+        }
+
+        /* ═══ SHARED PANEL STYLES ═══ */
+        .panel-card {
+            position: relative;
+            background: rgba(8, 8, 8, 0.94);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+        }
+
+        .panel-card .border-glow {
+            position: absolute; top: -1px; left: -1px; right: -1px; bottom: -1px;
+            border-radius: 13px; pointer-events: none; z-index: 0; overflow: hidden;
+        }
+        .panel-card .border-glow::before {
+            content: ''; position: absolute; top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: conic-gradient(from 0deg, transparent, rgba(255,255,255,0.12), transparent, rgba(255,255,255,0.06), transparent);
+            animation: rotateBorder 10s linear infinite;
+        }
+        @keyframes rotateBorder { to { transform: rotate(360deg); } }
+        .panel-card .border-glow::after {
+            content: ''; position: absolute; top: 1px; left: 1px; right: 1px; bottom: 1px;
+            background: rgba(8, 8, 8, 0.94); border-radius: 11px;
+        }
+
+        .panel-inner {
+            position: relative; z-index: 1;
+            display: flex; flex-direction: column;
+            height: 100%; overflow: hidden;
+        }
+
+        .glow-line {
+            height: 2px; flex-shrink: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), rgba(255,255,255,0.5), rgba(255,255,255,0.25), transparent);
+            animation: glowPulse 3s ease-in-out infinite;
+        }
+        @keyframes glowPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+        /* ═══ PANEL HEADERS ═══ */
+        .panel-header {
+            padding: 10px 12px 8px;
+            text-align: center;
+            position: relative;
+            background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+            flex-shrink: 0;
+        }
+        .panel-header::after {
+            content: ''; position: absolute; bottom: 0; left: 10%; width: 80%; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), rgba(255,255,255,0.3), rgba(255,255,255,0.15), transparent);
+        }
+        .panel-title {
+            font-family: 'Cinzel', serif; color: #f8f8f8;
+            font-size: clamp(13px, 2.5vw, 18px); font-weight: 900;
+            text-transform: uppercase; letter-spacing: clamp(1px, 0.3vw, 3px);
+            animation: titleGlow 6s ease-in-out infinite;
+        }
+        @keyframes titleGlow {
+            0%, 100% { text-shadow: 0 0 8px rgba(255,255,255,0.08); }
+            50% { text-shadow: 0 0 15px rgba(255,255,255,0.15); }
+        }
+        .panel-subtitle {
+            font-size: clamp(10px, 1.8vw, 13px); color: rgba(255,255,255,0.75);
+            letter-spacing: clamp(0.5px, 0.2vw, 1.5px); text-transform: uppercase;
+            margin-top: 4px; font-weight: 600;
+        }
+        .now-playing-line {
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 3px 8px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .now-playing-track {
+            color: rgba(255,255,255,0.9);
+            font-size: clamp(10px, 1.45vw, 12px);
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+            flex: 1;
+            text-align: left;
+        }
+        .now-playing-time {
+            color: rgba(255,255,255,0.78);
+            font-size: clamp(10px, 1.35vw, 12px);
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* ═══ REQUEST CTA PILL ═══ */
+        .request-cta-pill {
+            display: inline-block; margin-top: 6px;
+            padding: 4px 12px; border-radius: 20px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+            border: 1.5px solid rgba(255,255,255,0.25);
+            font-family: 'Montserrat', sans-serif;
+            font-size: clamp(9px, 1.6vw, 12px); font-weight: 800;
+            color: rgba(255,255,255,0.95); letter-spacing: clamp(0.5px, 0.15vw, 1px);
+            text-transform: uppercase;
+            animation: ctaPillPulse 3.6s ease-in-out infinite;
+        }
+        @keyframes ctaPillPulse {
+            0%, 100% {
+                background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+                border-color: rgba(255,255,255,0.25); box-shadow: none;
+            }
+            50% {
+                background: linear-gradient(135deg, rgba(255,255,255,0.22), rgba(255,255,255,0.12));
+                border-color: rgba(255,255,255,0.4); box-shadow: 0 0 16px rgba(255,255,255,0.12);
+            }
+        }
+
+        .header-badges {
+            display: flex; justify-content: center;
+            gap: 6px; margin-top: 6px;
+        }
+        .badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 8px; border-radius: 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-size: clamp(9px, 1.5vw, 13px); font-weight: 800;
+            letter-spacing: clamp(0.5px, 0.15vw, 1.5px); text-transform: uppercase;
+            color: rgba(255,255,255,0.8);
+        }
+        .badge-number { font-weight: 900; color: rgba(255,255,255,0.95); }
+        .live-dot {
+            width: 5px; height: 5px; background: #fff; border-radius: 50%;
+            animation: livePulse 2.2s ease-in-out infinite;
+            box-shadow: 0 0 4px rgba(255,255,255,0.4);
+        }
+        @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* ═══ TOP: SONG REQUESTS ═══ */
+        .requests-panel { flex: 1; min-height: 0; }
+
+        .request-list {
+            flex: 1; overflow-y: auto;
+            padding: 6px 8px; scroll-behavior: smooth; min-height: 0;
+            scrollbar-width: none;
+        }
+        .request-list::-webkit-scrollbar { display: none; width: 0; }
+
+        .empty-state {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 20px 10px; opacity: 0.5;
+        }
+        .vinyl-record {
+            width: 36px; height: 36px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+            animation: vinylSpin 4s linear infinite; margin-bottom: 8px;
+            position: relative;
+            background: radial-gradient(circle at center, rgba(255,255,255,0.12) 15%, transparent 16%, transparent 35%, rgba(255,255,255,0.03) 36%, rgba(255,255,255,0.03) 48%, transparent 49%);
+        }
+        .vinyl-record::before {
+            content: ''; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px; height: 8px; border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+        }
+        @keyframes vinylSpin { to { transform: rotate(360deg); } }
+        .empty-text {
+            font-family: 'Cinzel', serif; color: rgba(255,255,255,0.7);
+            font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+        }
+        .empty-subtext {
+            color: rgba(255,255,255,0.55); font-size: 10px;
+            letter-spacing: 1px; margin-top: 4px; text-align: center;
+        }
+
+        .request-item {
+            position: relative;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 6px;
+            padding: 7px 8px 7px 10px;
+            margin-bottom: 4px;
+            border-left: 2px solid rgba(255,255,255,0.1);
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+            transition: all 0.3s ease; overflow: hidden;
+        }
+        .request-item.newest {
+            border-left-color: rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.04);
+        }
+        .request-item.flash {
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both, flashIn 0.8s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-15px) scale(0.97); }
+            to { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes flashIn {
+            0% { background: rgba(255,255,255,0.12); border-left-color: rgba(255,255,255,0.8); }
+            100% { background: rgba(255,255,255,0.04); }
+        }
+
+        .item-number {
+            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            font-size: 22px; font-weight: 900;
+            color: rgba(255,255,255,0.03); line-height: 1; pointer-events: none;
+        }
+        .song-row {
+            display: flex; align-items: center; gap: 6px;
+            position: relative; z-index: 1;
+        }
+        .song-icon {
+            width: 24px; height: 24px; border-radius: 4px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; font-size: 12px;
+            filter: none;
+        }
+        .song-details { flex: 1; min-width: 0; overflow: hidden; }
+        .song-name {
+            color: #fff; font-size: clamp(11px, 1.8vw, 14px); font-weight: 800;
+            text-transform: uppercase; letter-spacing: clamp(0.1px, 0.15vw, 0.3px);
+            line-height: 1.25;
+            overflow: hidden;
+            position: relative;
+        }
+        .song-name-inner {
+            display: inline-block;
+            white-space: nowrap;
+        }
+        .song-name-inner.scrolling {
+            animation: marqueeScroll 11s linear 2;
+            padding-right: 30px;
+        }
+        @keyframes marqueeScroll {
+            0%, 15% { transform: translateX(0); }
+            85%, 100% { transform: translateX(calc(-100% + 80px)); }
+        }
+        .artist-name {
+            color: rgba(255,255,255,0.75); font-size: clamp(9px, 1.5vw, 12px);
+            font-weight: 600; font-style: italic; margin-top: 2px;
+        }
+        .user-tag {
+            display: inline-flex; align-items: center; gap: 3px;
+            margin-top: 3px; padding: 2px 7px; border-radius: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            color: rgba(255,255,255,0.75); font-size: clamp(8px, 1.3vw, 11px);
+            font-weight: 700; letter-spacing: clamp(0.4px, 0.15vw, 1px);
+            text-transform: uppercase; position: relative; z-index: 1;
+        }
+        .eta-tag {
+            margin-top: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 7px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.78);
+            font-size: clamp(8px, 1.25vw, 10px);
+            font-weight: 700;
+            letter-spacing: clamp(0.3px, 0.12vw, 0.8px);
+            text-transform: uppercase;
+        }
+        .eta-sep {
+            opacity: 0.6;
+        }
+        .new-badge {
+            display: inline-block; padding: 1px 4px; border-radius: 2px;
+            background: rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.85); font-size: 7px;
+            font-weight: 900; letter-spacing: 1.5px;
+            text-transform: uppercase; margin-left: 4px;
+            animation: badgePulse 2.8s ease-in-out infinite;
+        }
+        @keyframes badgePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .eq-bars {
+            display: flex; align-items: flex-end; gap: 1px;
+            height: 10px; flex-shrink: 0;
+        }
+        .eq-bar {
+            width: 2px; background: rgba(255,255,255,0.3); border-radius: 1px;
+            animation: eqBounce 1.1s ease-in-out infinite;
+        }
+        .eq-bar:nth-child(1) { height: 3px; animation-delay: 0s; }
+        .eq-bar:nth-child(2) { height: 6px; animation-delay: 0.12s; }
+        .eq-bar:nth-child(3) { height: 4px; animation-delay: 0.24s; }
+        .eq-bar:nth-child(4) { height: 7px; animation-delay: 0.36s; }
+        @keyframes eqBounce { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+
+        /* ═══ BOTTOM: SKIP METER ═══ */
+        .voting-panel { flex-shrink: 0; }
+
+        .voting-content {
+            padding: 8px 12px 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .compact-skip {
+            width: min(170px, 26vw);
+            max-width: 180px;
+            margin: 0 auto;
+            align-self: center;
+        }
+        .compact-skip .panel-inner {
+            padding: 8px 10px;
+        }
+        .compact-skip .panel-header,
+        .compact-skip .now-playing-line,
+        .compact-skip .header-badges,
+        .compact-skip .skip-bar-wrap,
+        .compact-skip .skip-bar-labels,
+        .compact-skip .recent-skippers,
+        .compact-skip .skip-warning,
+        .compact-skip .panel-footer {
+            display: none !important;
+        }
+        .compact-skip .voting-content {
+            padding: 4px 8px 6px;
+            gap: 8px;
+        }
+        .compact-skip .skip-command-hint {
+            gap: 6px;
+            margin-top: 0;
+        }
+        .compact-skip .skip-command-box {
+            padding: 4px 10px;
+            font-size: clamp(15px, 2.2vw, 20px);
+            letter-spacing: 1.6px;
+        }
+        .compact-skip .skip-command-arrow {
+            font-size: 10px;
+        }
+        .compact-skip .skip-cta-text {
+            display: none;
+        }
+        .compact-skip .skip-meter-circle {
+            width: 90px; height: 90px;
+        }
+        .compact-skip .skip-circle-bg circle,
+        .compact-skip .skip-circle-fill circle {
+            stroke-width: 4;
+        }
+        .compact-skip .skip-emoji {
+            font-size: 16px; margin-bottom: 0;
+        }
+        .compact-skip .skip-count {
+            font-size: clamp(28px, 4vw, 38px);
+            line-height: 0.95;
+        }
+        .compact-skip .skip-of-text,
+        .compact-skip .skip-mode-text {
+            display: none;
+        }
+
+        /* Circular skip meter */
+        .skip-meter-circle {
+            position: relative;
+            width: 100px; height: 100px;
+        }
+        .skip-circle-bg {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+        .skip-circle-bg circle {
+            fill: none;
+            stroke: rgba(255,255,255,0.06);
+            stroke-width: 5;
+        }
+        .skip-circle-fill {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            transform: rotate(-90deg);
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .skip-circle-fill circle {
+            fill: none;
+            stroke: rgba(255,255,255,0.25);
+            stroke-width: 5;
+            stroke-linecap: round;
+            stroke-dasharray: 263.894;
+            stroke-dashoffset: 263.894;
+            transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                        stroke 0.4s ease;
+        }
+        .skip-circle-fill.danger circle {
+            stroke: rgba(255,255,255,0.45);
+        }
+        .skip-circle-fill.full circle {
+            stroke: rgba(255,255,255,0.7);
+            filter: drop-shadow(0 0 6px rgba(255,255,255,0.3));
+        }
+
+        .skip-meter-center {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; z-index: 1;
+        }
+        .skip-emoji {
+            font-size: 20px; filter: none;
+            display: block; margin-bottom: 2px;
+            animation: skipEmojiBounce 4.5s ease-in-out infinite;
+        }
+        @keyframes skipEmojiBounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .skip-count {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 26px; font-weight: 900; color: #fff;
+            line-height: 1; transition: all 0.3s ease;
+        }
+        .skip-count.bump {
+            animation: countBump 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes countBump {
+            0% { transform: scale(1); } 35% { transform: scale(1.3); } 100% { transform: scale(1); }
+        }
+        .skip-count.glowing {
+            text-shadow: 0 0 15px rgba(255,255,255,0.4);
+        }
+        .skip-of-text {
+            font-size: 10px; font-weight: 700;
+            color: rgba(255,255,255,0.5);
+            letter-spacing: 1px; margin-top: 1px;
+        }
+        .skip-mode-text {
+            font-size: 9px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.6);
+            letter-spacing: 0.8px;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+
+        .skip-pulse-ring {
+            position: absolute; top: 50%; left: 50%;
+            width: 30px; height: 30px;
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            opacity: 0; pointer-events: none; z-index: 2;
+        }
+        .skip-pulse-ring.active {
+            animation: ringExpand 0.8s ease-out forwards;
+        }
+        @keyframes ringExpand {
+            0% { transform: translate(-50%, -50%) scale(0); opacity: 0.7; }
+            100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+        }
+
+        .skip-command-hint {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .skip-command-box {
+            display: inline-block;
+            padding: 4px 12px; border-radius: 6px;
+            background: rgba(255,255,255,0.12);
+            border: 1.5px solid rgba(255,255,255,0.25);
+            font-family: 'Montserrat', sans-serif;
+            font-size: clamp(13px, 2vw, 16px); font-weight: 900;
+            color: rgba(255,255,255,1); letter-spacing: 2px;
+            animation: commandPulse 3.2s ease-in-out infinite;
+        }
+        @keyframes commandPulse {
+            0%, 100% {
+                background: rgba(255,255,255,0.12);
+                border-color: rgba(255,255,255,0.25);
+                box-shadow: 0 0 8px rgba(255,255,255,0.08);
+            }
+            50% {
+                background: rgba(255,255,255,0.18);
+                border-color: rgba(255,255,255,0.4);
+                box-shadow: 0 0 20px rgba(255,255,255,0.15);
+            }
+        }
+        .skip-command-arrow {
+            font-size: clamp(10px, 1.5vw, 13px); color: rgba(255,255,255,0.6);
+            animation: arrowBounce 2.2s ease-in-out infinite;
+        }
+        @keyframes arrowBounce {
+            0%, 100% { transform: translateX(0); opacity: 0.5; }
+            50% { transform: translateX(3px); opacity: 0.9; }
+        }
+        .skip-cta-text {
+            font-size: clamp(9px, 1.3vw, 11px); font-weight: 700;
+            color: rgba(255,255,255,0.6);
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+
+        /* Progress bar */
+        .skip-bar-wrap {
+            width: 100%; height: 12px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 5px;
+            border: 1px solid rgba(255,255,255,0.06);
+            overflow: hidden; position: relative;
+        }
+        .skip-bar-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, rgba(255,255,255,0.1), rgba(255,255,255,0.3));
+            border-radius: 5px;
+            transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative; overflow: hidden;
+        }
+        .skip-bar-fill::after {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            animation: shimmer 3s ease-in-out infinite;
+        }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+        .skip-bar-fill.danger {
+            background: linear-gradient(90deg, rgba(255,255,255,0.2), rgba(255,255,255,0.5));
+        }
+        .skip-bar-fill.full {
+            background: linear-gradient(90deg, rgba(255,255,255,0.3), rgba(255,255,255,0.7));
+        }
+
+        .skip-bar-labels {
+            display: flex; justify-content: space-between;
+            margin-top: 2px; padding: 0 2px;
+        }
+        .skip-bar-label {
+            font-size: 9px; font-weight: 700;
+            color: rgba(255,255,255,0.5); letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        /* Recent skippers */
+        .recent-skippers {
+            display: flex; gap: 3px; flex-wrap: wrap;
+            justify-content: center;
+        }
+        .skipper-chip {
+            display: inline-flex; align-items: center; gap: 2px;
+            padding: 2px 6px; border-radius: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            font-size: 8px; font-weight: 700;
+            color: rgba(255,255,255,0.5); letter-spacing: 0.5px;
+            text-transform: uppercase;
+            animation: chipIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        @keyframes chipIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+        .skipper-icon { font-size: 8px; filter: none; }
+
+        /* Skip warning */
+        .skip-warning {
+            overflow: hidden;
+            max-height: 0; opacity: 0;
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .skip-warning.active { max-height: 50px; opacity: 1; }
+        .skip-warning-inner {
+            display: flex; align-items: center; justify-content: center;
+            gap: 6px; padding: 6px 10px; border-radius: 8px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.2);
+            animation: warningPulse 0.8s ease-in-out infinite;
+        }
+        @keyframes warningPulse {
+            0%, 100% {
+                border-color: rgba(255,255,255,0.2);
+                background: rgba(255,255,255,0.08);
+            }
+            50% {
+                border-color: rgba(255,255,255,0.5);
+                background: rgba(255,255,255,0.12);
+                box-shadow: 0 0 20px rgba(255,255,255,0.08);
+            }
+        }
+        .skip-warning-text {
+            font-size: 12px; font-weight: 900; letter-spacing: 2px;
+            text-transform: uppercase; color: rgba(255,255,255,0.95);
+        }
+        .skip-warning-icon {
+            font-size: 12px; filter: grayscale(1) brightness(1.3);
+            animation: iconShake 0.3s ease-in-out infinite;
+        }
+        @keyframes iconShake {
+            0%, 100% { transform: rotate(0deg); }
+            25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); }
+        }
+
+        /* ═══ PANEL FOOTERS ═══ */
+        .panel-footer {
+            padding: 5px 8px; text-align: center;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            background: linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.3));
+            flex-shrink: 0;
+        }
+        .footer-text {
+            color: rgba(255,255,255,0.55); font-size: clamp(8px, 1.2vw, 10px);
+            letter-spacing: clamp(1px, 0.15vw, 2px); text-transform: uppercase; font-weight: 700;
+        }
+
+        /* ═══ FLOATING EFFECTS ═══ */
+        .note-float {
+            position: fixed; font-size: 14px; pointer-events: none; z-index: 100;
+            animation: noteRise 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            color: rgba(255,255,255,0.3);
+        }
+        @keyframes noteRise {
+            0% { opacity: 0.6; transform: translateY(0) rotate(0deg) scale(1); }
+            100% { opacity: 0; transform: translateY(-80px) rotate(20deg) scale(0.2); }
+        }
+        .skip-float {
+            position: fixed; font-size: 14px; pointer-events: none; z-index: 100;
+            font-family: 'Montserrat', sans-serif; font-weight: 900;
+            color: rgba(255,255,255,0.6); letter-spacing: 3px;
+            text-transform: uppercase;
+            animation: skipFloatUp 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes skipFloatUp {
+            0% { opacity: 0.9; transform: translateY(0) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-80px) scale(0.4); }
+        }
+        .vote-particle {
+            position: absolute; width: 3px; height: 3px;
+            background: rgba(255,255,255,0.6); border-radius: 50%;
+            pointer-events: none; z-index: 10;
+            animation: particleBurst 0.7s ease-out forwards;
+        }
+        @keyframes particleBurst {
+            0% { opacity: 1; transform: translate(0,0) scale(1); }
+            100% { opacity: 0; transform: translate(var(--px), var(--py)) scale(0); }
+        }
+
+        /* ═══ PANEL TOASTS ═══ */
+        .panel-toast {
+            position: absolute; top: 6px; left: 50%;
+            transform: translateX(-50%) translateY(-40px);
+            background: rgba(10,10,10,0.95);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 14px; padding: 4px 10px;
+            z-index: 200; display: flex; align-items: center; gap: 4px;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        opacity 0.4s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            opacity: 0; pointer-events: none;
+            white-space: nowrap;
+        }
+        .panel-toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        .panel-toast-icon {
+            font-size: 11px; filter: none;
+        }
+        .panel-toast-text {
+            font-size: 10px; font-weight: 900;
+            color: rgba(255,255,255,0.9); letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* ═══ CONNECTION BANNER ═══ */
+        .conn-banner {
+            position: fixed; top: 14px; left: 50%;
+            transform: translateX(-50%) translateY(-10px);
+            background: rgba(0,0,0,0.9);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 8px 12px; border-radius: 10px;
+            color: rgba(255,255,255,0.95); z-index: 400;
+            opacity: 0; transition: opacity 0.6s ease, transform 0.6s ease;
+            pointer-events: none; font-size: 11px; font-weight: 700;
+        }
+        .conn-banner.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .conn-banner.connected { background: rgba(0,200,0,0.9); }
+        .conn-banner.error { background: rgba(200,0,0,0.9); }
+
+        /* ═══ MODERATOR BAR ═══ */
+        .mod-bar {
+            position: fixed; left: 12px; bottom: 12px; z-index: 300;
+        }
+        .mod-toggle {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: rgba(255,255,255,0.85);
+            padding: 6px 10px; border-radius: 8px;
+            font-weight: 800; cursor: pointer; font-size: 11px;
+        }
+        .mod-panel {
+            margin-top: 8px; background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 8px; border-radius: 8px;
+            display: none; gap: 6px; width: 220px;
+        }
+        .mod-panel.show { display: flex; flex-direction: column; }
+        .mod-btn {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.9);
+            padding: 6px; border-radius: 6px;
+            cursor: pointer; font-weight: 800; font-size: 11px;
+        }
+        .mod-feedback {
+            margin-top: 6px; font-size: 11px;
+            color: rgba(255,255,255,0.9);
+            opacity: 0; transition: opacity 0.4s ease;
+        }
+        .mod-feedback.show { opacity: 1; }
+
+        .hidden-panel { display: none !important; }
+        .requests-panel.disabled-by-default { display: none !important; }
+
+        /* ═══ FULL PANEL FLASH ON THRESHOLD ═══ */
+        .voting-panel.threshold-flash .border-glow::before {
+            background: conic-gradient(from 0deg, transparent, rgba(255,255,255,0.3), transparent, rgba(255,255,255,0.15), transparent);
+            animation: rotateBorder 4s linear infinite;
+        }
+
+        /* ═══ MOBILE RESPONSIVE ═══ */
+        @media screen and (max-width: 768px) {
+            .panel-card { background: rgba(8,8,8,0.96); }
+            .song-name { color: #ffffff; }
+            .panel-title { color: #ffffff; text-shadow: 0 0 10px rgba(255,255,255,0.2); }
+        }
+
+        @media screen and (max-width: 768px) and (orientation: portrait) {
+            .widget-wrapper { gap: 6px; padding: 6px; }
+            .panel-header { padding: 12px 10px 10px; }
+            .panel-title { font-size: clamp(16px, 4vw, 20px); }
+            .panel-subtitle { font-size: clamp(12px, 3vw, 14px); }
+            .request-cta-pill { font-size: clamp(11px, 2.5vw, 13px); padding: 6px 14px; }
+            .badge { font-size: clamp(11px, 2.5vw, 14px); padding: 4px 10px; }
+            .request-item { padding: 10px 10px 10px 12px; margin-bottom: 6px; }
+            .song-name { font-size: clamp(13px, 3.5vw, 16px); }
+            .artist-name { font-size: clamp(11px, 3vw, 13px); }
+            .user-tag { font-size: clamp(9px, 2.5vw, 11px); }
+            .song-icon { width: 28px; height: 28px; font-size: 12px; }
+            .skip-command-box { font-size: clamp(16px, 4vw, 20px); padding: 8px 18px; }
+            .skip-meter-circle { width: 120px; height: 120px; }
+            .skip-emoji { font-size: 28px; }
+            .skip-count { font-size: 32px; }
+            .skip-of-text { font-size: 12px; }
+            .skip-bar-wrap { height: 16px; }
+            .skipper-chip { font-size: clamp(10px, 2.5vw, 12px); padding: 4px 8px; }
+            .particle { display: none; }
+        }
+
+        @media screen and (max-height: 500px) and (orientation: landscape) {
+            .widget-wrapper { gap: 4px; padding: 4px; }
+            .panel-header { padding: 6px 8px 5px; }
+            .panel-title { font-size: clamp(12px, 3vw, 14px); }
+            .panel-subtitle { font-size: clamp(9px, 2vw, 11px); }
+            .skip-meter-circle { width: 80px; height: 80px; }
+            .skip-emoji { font-size: 16px; }
+            .skip-count { font-size: 22px; }
+            .particle { display: none; }
+        }
+
+        @media (hover: none) and (pointer: coarse) {
+            .mod-toggle, .mod-btn { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+            .panel-title, .panel-subtitle, .badge, .skip-command-box {
+                -webkit-user-select: none; user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            .song-name-inner.scrolling { transform: none !important; }
+        }
+    </style>
+
+    <!-- Testing panel CSS -->
+    <style>
+        .test-bar { position: fixed; right: 12px; bottom: 12px; z-index: 310; }
+        .test-toggle { background: rgba(255,165,0,0.08); border: 1px solid rgba(255,165,0,0.12); color: #ffd79a; padding: 6px 10px; border-radius: 8px; font-weight:800; cursor:pointer; }
+        .test-panel { margin-top:8px; background: rgba(20,12,0,0.9); border:1px solid rgba(255,165,0,0.06); padding:8px; border-radius:8px; display:none; width:260px; gap:8px; color:#fff; }
+        .test-panel.show { display:flex; flex-direction:column; }
+        .test-panel input[type="text"], .test-panel textarea { width:100%; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.4); color:#fff; }
+        .test-row { display:flex; gap:8px; align-items:center; }
+        .test-send { background: rgba(255,165,0,0.14); border:1px solid rgba(255,165,0,0.18); color:#fff; padding:6px 8px; border-radius:6px; cursor:pointer; font-weight:800; }
+        .test-feedback { font-size:12px; color:#ffd79a; opacity:0; transition:opacity 0.25s; }
+        .test-feedback.show { opacity:1; }
+    </style>
+    <style>
+        :root{ --accent1: #5b3e88; --accent2: #1aa6a0; }
+
+        /* Safer padding for live overlays */
+        .widget-wrapper { padding: 18px !important; }
+
+        /* Slightly stronger/backdrop blur for panels to separate from video */
+        .panel-card { background: rgba(8,8,8,0.96) !important; backdrop-filter: blur(5px) saturate(110%); }
+
+        /* Accent glow and CTA styles (muted accents) */
+        .request-cta-pill { background: linear-gradient(90deg, var(--accent1), var(--accent2)) !important; color: rgba(255,255,255,0.9) !important; font-size: clamp(14px, 2.2vw, 16px) !important; box-shadow: 0 8px 20px rgba(26,166,160,0.05); }
+        .badge { background: linear-gradient(90deg, var(--accent1), var(--accent2)) !important; color: rgba(255,255,255,0.88) !important; font-size: clamp(14px, 1.6vw, 16px) !important; box-shadow: 0 6px 18px rgba(91,62,136,0.04); }
+        .live-dot { background: linear-gradient(90deg, var(--accent1), var(--accent2)) !important; box-shadow: 0 0 8px rgba(91,62,136,0.12), 0 0 5px rgba(26,166,160,0.06) !important; width:8px; height:8px; }
+        .glow-line { background: linear-gradient(90deg, var(--accent1), var(--accent2)) !important; height: 4px !important; box-shadow: 0 6px 18px rgba(26,166,160,0.04) !important; }
+
+        /* Skip meter accent */
+        .skip-bar-fill { background: linear-gradient(90deg, var(--accent1), var(--accent2)) !important; box-shadow: 0 6px 16px rgba(26,166,160,0.05) !important; }
+        .skip-circle-fill circle { stroke: var(--accent1) !important; filter: drop-shadow(0 6px 12px rgba(26,166,160,0.04)) !important; }
+
+        /* Readability improvements (softer shadows, reduced opacity to blend with dark theme) */
+        .panel-subtitle, .song-name, .artist-name, .skip-of-text, .skip-cta-text, .panel-toast-text, .request-cta-pill, .badge, .skip-command-box, .skip-warning-text, .empty-text, .empty-subtext {
+            color: rgba(255,255,255,0.86) !important; text-shadow: 0 1px 3px rgba(0,0,0,0.45) !important; line-height: 1.32 !important;
+        }
+
+        .panel-subtitle { font-size: clamp(14px, 1.8vw, 16px) !important; font-weight:700; }
+        .song-name { font-size: clamp(14px, 2.2vw, 18px) !important; font-weight:900; }
+        .artist-name { font-size: clamp(13px, 1.8vw, 15px) !important; font-weight:700; }
+        .skip-of-text, .skip-cta-text { font-size: 14px !important; font-weight:800; }
+        .panel-toast-text { font-size: 14px !important; }
+        .skip-command-box { font-size: clamp(14px, 2.2vw, 18px) !important; }
+        .skip-warning-text { font-size: 16px !important; }
+        .empty-text { font-size: 16px !important; }
+        .empty-subtext { font-size: 14px !important; }
+
+        /* Reduce visual noise for particles */
+        .bg-particles .particle { opacity: 0.10 !important; }
+
+        /* Keep mod/test panels visually muted by default (they are hidden unless opened) */
+        .mod-panel, .test-panel { display: none; }
+    </style>
+</head>
+<body>
+    <div class="bg-particles" id="particles"></div>
+
+    <div class="widget-wrapper" role="main" aria-label="TikTok Live Widget">
+        <!-- TOP: SONG REQUESTS -->
+        <div class="panel-card requests-panel" role="region" aria-label="Song Requests">
+            <div class="border-glow"></div>
+            <div class="panel-toast" id="request-toast">
+                <span class="panel-toast-icon">&#127911;</span>
+                <span class="panel-toast-text" id="request-toast-msg"></span>
+            </div>
+            <div class="panel-inner">
+                <div class="glow-line"></div>
+                <div class="panel-header">
+                    <h1 class="panel-title">&#127911; Song Requests</h1>
+                    <div class="panel-subtitle" role="note">Type !req Song - Artist</div>
+                    <div class="request-cta-pill">&#9654; SUBMIT A REQUEST &#9664;</div>
+                    <div class="header-badges">
+                        <div class="badge"><span class="live-dot"></span> Live</div>
+                        <div class="badge"><span class="badge-number" id="request-count">0</span> Reqs</div>
+                    </div>
+                </div>
+                <div class="request-list" id="request-list" role="list" aria-live="polite" aria-label="Song request queue">
+                    <div class="empty-state">
+                        <div class="vinyl-record"></div>
+                        <div class="empty-text">Waiting for requests</div>
+                        <div class="empty-subtext">Type !req Song - Artist</div>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                    <div class="footer-text">🎵 QUEUE DISPLAY 🎵</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM: SKIP METER -->
+        <div class="panel-card voting-panel compact-skip" id="voting-panel" role="region" aria-label="Skip Meter">
+            <div class="border-glow"></div>
+            <div class="panel-toast" id="skip-toast">
+                <span class="panel-toast-icon">⏭️</span>
+                <span class="panel-toast-text" id="skip-toast-msg"></span>
+            </div>
+            <div class="panel-inner">
+                <div class="glow-line"></div>
+                <div class="panel-header">
+                    <h2 class="panel-title">⏭️ Skip Meter</h2>
+                    <div class="panel-subtitle" role="note">Don't like this song? Type !skip</div>
+                    <div class="now-playing-line" id="now-playing-line">
+                        <span class="now-playing-track" id="now-playing-track">Now: Waiting for Spotify</span>
+                        <span class="now-playing-time" id="now-playing-time">--:--/--:--</span>
+                    </div>
+                    <div class="header-badges">
+                        <div class="badge"><span class="badge-number" id="skip-count-badge">0</span> Skips</div>
+                    </div>
+                </div>
+                <div class="voting-content">
+                    <!-- Command hint -->
+                    <div class="skip-command-hint">
+                        <span class="skip-command-arrow">▶</span>
+                        <span class="skip-command-box">!skip</span>
+                        <span class="skip-cta-text">to vote</span>
+                    </div>
+
+                    <!-- Centered circle meter -->
+                    <div class="skip-meter-circle" id="skip-meter-circle">
+                        <div class="skip-pulse-ring" id="skip-ring"></div>
+                        <svg class="skip-circle-bg" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="42"></circle>
+                        </svg>
+                        <svg class="skip-circle-fill" id="skip-circle-fill" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="42"></circle>
+                        </svg>
+                        <div class="skip-meter-center">
+                            <span class="skip-emoji" aria-hidden="true">⏭️</span>
+                            <div class="skip-count" id="skip-count" role="status" aria-label="Skip votes">0</div>
+                            <div class="skip-of-text" id="skip-of-text" aria-label="Skip threshold">of 5</div>
+                            <div class="skip-mode-text" id="skip-mode-text" aria-label="Skip threshold mode">mode: auto</div>
+                        </div>
+                    </div>
+
+                    <!-- Progress bar -->
+                    <div style="width:100%;">
+                        <div class="skip-bar-wrap">
+                            <div class="skip-bar-fill" id="skip-bar-fill"></div>
+                        </div>
+                        <div class="skip-bar-labels">
+                            <span class="skip-bar-label">Playing</span>
+                            <span class="skip-bar-label">Skip →</span>
+                        </div>
+                    </div>
+
+                    <!-- Recent skippers -->
+                    <div class="recent-skippers" id="recent-skippers"></div>
+
+                    <!-- Warning -->
+                    <div class="skip-warning" id="skip-warning">
+                        <div class="skip-warning-inner">
+                            <span class="skip-warning-icon">⚠️</span>
+                            <span class="skip-warning-text">Skip this song!</span>
+                            <span class="skip-warning-icon">⚠️</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                    <div class="footer-text">⚡ Midlife Disaster ⚡</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection banner -->
+    <div class="conn-banner" id="conn-banner">Connection lost - reconnecting...</div>
+
+    <!-- Moderator bar -->
+    <div class="mod-bar">
+        <div class="mod-toggle" id="mod-toggle">Mods ▾</div>
+            <div class="mod-panel" id="mod-panel">
+                <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+                    <input type="password" id="mod-password" placeholder="Control password" style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.4);color:#fff;">
+                    <button class="mod-btn" id="mod-login" style="padding:6px 8px;">Save</button>
+                </div>
+                <button class="mod-btn" id="mod-clear">Clear Queue</button>
+                <button class="mod-btn" id="mod-reset">Reset Skip Votes</button>
+                <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+                    <input type="text" id="mod-threshold" placeholder="Skip threshold (number or auto)" style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.4);color:#fff;">
+                </div>
+                <div style="display:flex;gap:6px;">
+                    <button class="mod-btn" id="mod-threshold-set" style="flex:1;">Set Threshold</button>
+                    <button class="mod-btn" id="mod-threshold-auto" style="flex:1;">Auto Mode</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
+                    <label style="font-size:12px;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.8);">
+                        <input type="checkbox" id="vis-requests"> Show Requests
+                    </label>
+                    <label style="font-size:12px;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.8);">
+                        <input type="checkbox" id="vis-skip" checked> Show Skip Meter
+                    </label>
+                </div>
+                <div class="mod-feedback" id="mod-feedback"></div>
+            </div>
+    </div>
+
+    <!-- Testing panel (simulate comments) -->
+    <div class="test-bar">
+        <div class="test-toggle" id="test-toggle">Test ▾</div>
+        <div class="test-panel" id="test-panel">
+            <input type="text" id="test-username" placeholder="Username" value="TestUser">
+            <textarea id="test-message" rows="2" placeholder="Message or command (e.g. !req Song by Artist)"></textarea>
+            <div class="test-row">
+                <label style="display:flex;align-items:center;gap:8px;color:#ffd79a;"><input type="checkbox" id="test-is-mod"> Moderator</label>
+                <button class="test-send" id="test-send">Send</button>
+            </div>
+            <div class="test-feedback" id="test-feedback">Sent</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // ═══ STATE ═══
+        let hadLiveConnection = false;
+        let demoStarted = false;
+        let demoTimers = [];
+        let previousCount = 0;
+        let lastSkips = 0;
+        let requestToastTimer = null;
+        let skipToastTimer = null;
+        let connBannerTimer = null;
+        let nowPlayingState = null;
+        let nowPlayingLastUpdateMs = 0;
+        let nowPlayingTickerStarted = false;
+        let nowPlayingAnchorMs = 0;
+        let nowPlayingTrackKey = '';
+        let nowPlayingDisplayedElapsed = 0;
+        let lastQueueEtaRefreshSec = -1;
+        let queueItems = [];
+        const PAGE_PARAMS = new URLSearchParams(window.location.search);
+        const DEMO_MODE_ENABLED = PAGE_PARAMS.get('demo') === '1';
+        const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 42; // r=42 → ~263.894
+        const DEFAULT_QUEUE_DURATION_SEC = 210;
+
+        if (PAGE_PARAMS.get('bg') === 'transparent' || PAGE_PARAMS.get('transparent') === '1') {
+            document.documentElement.classList.add('transparent-bg');
+        }
+
+        // ═══ PARTICLES ═══
+        (function createParticles() {
+            const c = document.getElementById('particles');
+            // Fewer, subtler particles for live overlay clarity
+            for (let i = 0; i < 6; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                p.style.left = Math.random() * 100 + '%';
+                p.style.width = p.style.height = (Math.random() * 3 + 1) + 'px';
+                p.style.background = 'rgba(255,255,255,0.08)';
+                p.style.opacity = 0.18;
+                p.style.animationDuration = (Math.random() * 6 + 12) + 's';
+                p.style.animationDelay = (Math.random() * 10) + 's';
+                c.appendChild(p);
+            }
+        })();
+
+        // ═══ TOASTS ═══
+        function showRequestToast(msg) {
+            var toast = document.getElementById('request-toast');
+            document.getElementById('request-toast-msg').textContent = msg;
+            toast.classList.add('show');
+            clearTimeout(requestToastTimer);
+            requestToastTimer = setTimeout(function() { toast.classList.remove('show'); }, 2500);
+        }
+
+        function showSkipToast(msg) {
+            var toast = document.getElementById('skip-toast');
+            document.getElementById('skip-toast-msg').textContent = msg;
+            toast.classList.add('show');
+            clearTimeout(skipToastTimer);
+            skipToastTimer = setTimeout(function() { toast.classList.remove('show'); }, 2500);
+        }
+
+        // ═══ CONNECTION BANNER ═══
+        function showConnectionBanner(message, type) {
+            var banner = document.getElementById('conn-banner');
+            if (!banner) return;
+            banner.className = 'conn-banner ' + type;
+            banner.textContent = message;
+            setTimeout(function() { banner.classList.add('show'); }, 50);
+            clearTimeout(connBannerTimer);
+            connBannerTimer = setTimeout(function() {
+                banner.classList.remove('show');
+            }, 3000);
+        }
+
+        function formatClock(seconds) {
+            var s = Math.max(0, Math.floor(Number(seconds) || 0));
+            var m = Math.floor(s / 60);
+            var r = s % 60;
+            return m + ':' + String(r).padStart(2, '0');
+        }
+
+        function getNowPlayingRemainingSec() {
+            if (!nowPlayingState || !nowPlayingState.available || nowPlayingState.duration <= 0) {
+                return { remaining: 0, estimated: true };
+            }
+            var elapsed = nowPlayingState.playing
+                ? ((Date.now() - nowPlayingAnchorMs) / 1000)
+                : nowPlayingState.elapsed;
+            if (nowPlayingState.duration > 0) {
+                elapsed = Math.min(elapsed, nowPlayingState.duration);
+            }
+            elapsed = Math.max(0, elapsed);
+            return {
+                remaining: Math.max(0, Math.floor(nowPlayingState.duration - elapsed)),
+                estimated: false
+            };
+        }
+
+        function queueEtaForIndex(index) {
+            var base = getNowPlayingRemainingSec();
+            var total = base.remaining;
+            var estimated = base.estimated;
+
+            for (var i = 0; i < index; i++) {
+                var item = queueItems[i] || {};
+                var d = Math.floor(Number(item.duration_sec) || 0);
+                if (d <= 0) {
+                    d = DEFAULT_QUEUE_DURATION_SEC;
+                    estimated = true;
+                }
+                total += d;
+            }
+
+            return { seconds: Math.max(0, total), estimated: estimated };
+        }
+
+        function queueWindowForIndex(index) {
+            var start = queueEtaForIndex(index);
+            var item = queueItems[index] || {};
+            var d = Math.floor(Number(item.duration_sec) || 0);
+            var estimatedEnd = start.estimated;
+            if (d <= 0) {
+                d = DEFAULT_QUEUE_DURATION_SEC;
+                estimatedEnd = true;
+            }
+            return {
+                startSec: start.seconds,
+                endSec: Math.max(0, start.seconds + d),
+                estimatedStart: start.estimated,
+                estimatedEnd: estimatedEnd
+            };
+        }
+
+        function refreshQueueEtaLabels() {
+            if (!queueItems || queueItems.length === 0) return;
+            var etaEls = document.querySelectorAll('.eta-tag[data-index]');
+            etaEls.forEach(function(el) {
+                var i = Number(el.getAttribute('data-index'));
+                if (!Number.isFinite(i)) return;
+                var win = queueWindowForIndex(i);
+                var startText = (win.estimatedStart ? '~' : '') + 'Starts ' + formatClock(win.startSec);
+                var endText = (win.estimatedEnd ? '~' : '') + 'Ends ' + formatClock(win.endSec);
+                el.innerHTML = '&#9201; ' + startText + ' <span class="eta-sep">|</span> ' + endText;
+            });
+        }
+
+        function renderNowPlayingTick() {
+            var trackEl = document.getElementById('now-playing-track');
+            var timeEl = document.getElementById('now-playing-time');
+            if (!trackEl || !timeEl) return;
+            if (!nowPlayingState || !nowPlayingState.available) return;
+
+            var label = nowPlayingState.title ? nowPlayingState.title : 'Unknown Track';
+            if (nowPlayingState.artist) label += ' - ' + nowPlayingState.artist;
+            trackEl.textContent = 'Now: ' + label;
+
+            var elapsedCandidate = nowPlayingState.playing
+                ? ((Date.now() - nowPlayingAnchorMs) / 1000)
+                : nowPlayingState.elapsed;
+            if (nowPlayingState.playing) {
+                nowPlayingDisplayedElapsed = Math.max(nowPlayingDisplayedElapsed, elapsedCandidate);
+            } else {
+                nowPlayingDisplayedElapsed = elapsedCandidate;
+            }
+            var elapsed = nowPlayingDisplayedElapsed;
+            if (nowPlayingState.duration > 0) {
+                elapsed = Math.min(elapsed, nowPlayingState.duration);
+            }
+            elapsed = Math.max(0, elapsed);
+            nowPlayingDisplayedElapsed = elapsed;
+            var elapsedText = formatClock(elapsed);
+            var durationText = formatClock(nowPlayingState.duration);
+            var suffix = nowPlayingState.playing ? '' : ' (paused)';
+            timeEl.textContent = elapsedText + '/' + durationText + suffix;
+            var nowSec = Math.floor(Date.now() / 1000);
+            if (nowSec !== lastQueueEtaRefreshSec) {
+                lastQueueEtaRefreshSec = nowSec;
+                refreshQueueEtaLabels();
+            }
+        }
+
+        function updateNowPlaying(data) {
+            var trackEl = document.getElementById('now-playing-track');
+            var timeEl = document.getElementById('now-playing-time');
+            if (!trackEl || !timeEl) return;
+
+            if (!data || !data.available) {
+                nowPlayingState = null;
+                nowPlayingTrackKey = '';
+                nowPlayingAnchorMs = 0;
+                nowPlayingDisplayedElapsed = 0;
+                trackEl.textContent = 'Now: Waiting for Spotify';
+                timeEl.textContent = '--:--/--:--';
+                return;
+            }
+
+            var incomingState = {
+                available: true,
+                title: String(data.title || '').trim(),
+                artist: String(data.artist || '').trim(),
+                elapsed: Math.max(0, Math.floor(Number(data.elapsed) || 0)),
+                duration: Math.max(0, Math.floor(Number(data.duration) || 0)),
+                playing: !!data.playing
+            };
+            var incomingKey = (incomingState.title + '|' + incomingState.artist).toLowerCase();
+            var incomingElapsed = incomingState.elapsed;
+            var nowMs = Date.now();
+
+            if (!nowPlayingTrackKey || incomingKey !== nowPlayingTrackKey) {
+                nowPlayingAnchorMs = nowMs - (incomingElapsed * 1000);
+                nowPlayingTrackKey = incomingKey;
+                nowPlayingDisplayedElapsed = incomingElapsed;
+            } else {
+                var localElapsed = nowPlayingDisplayedElapsed;
+                var drift = incomingElapsed - localElapsed;
+
+                // Smooth forward corrections, ignore small backward jitter.
+                if (drift > 1.2) {
+                    nowPlayingAnchorMs = nowMs - (incomingElapsed * 1000);
+                } else if (drift < -4) {
+                    // Large negative jump usually indicates manual seek/back.
+                    nowPlayingAnchorMs = nowMs - (incomingElapsed * 1000);
+                    nowPlayingDisplayedElapsed = incomingElapsed;
+                }
+            }
+
+            if (!incomingState.playing) {
+                nowPlayingAnchorMs = nowMs - (incomingElapsed * 1000);
+                nowPlayingDisplayedElapsed = incomingElapsed;
+            }
+            nowPlayingState = incomingState;
+            nowPlayingLastUpdateMs = Date.now();
+
+            if (!nowPlayingTickerStarted) {
+                nowPlayingTickerStarted = true;
+                setInterval(renderNowPlayingTick, 250);
+            }
+            renderNowPlayingTick();
+        }
+
+        // ═══ SONG REQUESTS ═══
+        function spawnNotes() {
+            var notes = ['♪', '♫', '♩', '♬'];
+            var panel = document.querySelector('.requests-panel');
+            var rect = panel.getBoundingClientRect();
+            for (var i = 0; i < 3; i++) {
+                (function(idx) {
+                    setTimeout(function() {
+                        var note = document.createElement('div');
+                        note.className = 'note-float';
+                        note.textContent = notes[Math.floor(Math.random() * notes.length)];
+                        note.style.left = (rect.left + 10 + Math.random() * (rect.width - 20)) + 'px';
+                        note.style.top = (rect.top + rect.height * 0.3 + Math.random() * 40) + 'px';
+                        document.body.appendChild(note);
+                        setTimeout(function() { note.remove(); }, 1500);
+                    }, idx * 100);
+                })(i);
+            }
+        }
+
+        function parseSong(song) {
+            var title = song, artist = '';
+            var upper = title.toUpperCase();
+            if (upper.includes(' BY ')) {
+                var idx = upper.indexOf(' BY ');
+                artist = title.substring(idx + 4).trim();
+                title = title.substring(0, idx).trim();
+            }
+            return { title: title, artist: artist };
+        }
+
+        function makeEl(tag, className, text) {
+            var el = document.createElement(tag);
+            if (className) el.className = className;
+            if (text !== undefined && text !== null) el.textContent = text;
+            return el;
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderQueue(data) {
+            var list = document.getElementById('request-list');
+            queueItems = Array.isArray(data) ? data : [];
+            document.getElementById('request-count').textContent = queueItems.length;
+
+            if (queueItems.length === 0) {
+                list.innerHTML = '';
+                list.appendChild(createEmptyState());
+                return;
+            }
+
+            var isNew = queueItems.length > previousCount;
+            previousCount = queueItems.length;
+            list.innerHTML = '';
+
+            queueItems.forEach(function(item, i) {
+                var p = parseSong(item.song);
+                item.user = escapeHtml(item.user);
+                var div = document.createElement('div');
+                div.className = 'request-item';
+                div.style.animationDelay = (i * 0.04) + 's';
+
+                var newest = i === queueItems.length - 1;
+                if (newest) {
+                    div.classList.add('newest');
+                    if (isNew) div.classList.add('flash');
+                }
+
+
+                var eq = newest ? '<div class="eq-bars"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>' : '';
+                var badge = (newest && isNew) ? '<span class="new-badge">New</span>' : '';
+                var artist = p.artist ? '<div class="artist-name">by ' + escapeHtml(p.artist) + '</div>' : '';
+                var titleText = escapeHtml(p.title);
+                var win = queueWindowForIndex(i);
+                var startText = (win.estimatedStart ? '~' : '') + 'Starts ' + formatClock(win.startSec);
+                var endText = (win.estimatedEnd ? '~' : '') + 'Ends ' + formatClock(win.endSec);
+                var etaText = startText + ' | ' + endText;
+
+                div.innerHTML =
+                    '<span class="item-number">' + (i + 1) + '</span>' +
+                    '<div class="song-row">' +
+                        '<div class="song-icon">&#127911;</div>' +
+                        '<div class="song-details">' +
+                            '<div class="song-name"><span class="song-name-inner">' + titleText + badge + '</span></div>' +
+                            artist +
+                        '</div>' +
+                        eq +
+                    '</div>' +
+                    '<div class="user-tag">&#128100; ' + item.user + '</div>' +
+                    '<div class="eta-tag" data-index="' + i + '">&#9201; ' + etaText + '</div>';
+
+                list.appendChild(div);
+            });
+
+            // Check which song names need scrolling based on actual rendered width
+            requestAnimationFrame(function() {
+                list.querySelectorAll('.song-name').forEach(function(el) {
+                    var inner = el.querySelector('.song-name-inner');
+                    if (inner && inner.scrollWidth > el.clientWidth) {
+                        inner.classList.add('scrolling');
+                    }
+                });
+            });
+
+            list.scrollTop = list.scrollHeight;
+
+            if (isNew && queueItems.length > 0) {
+                var last = parseSong(queueItems[queueItems.length - 1].song);
+                var requester = (queueItems[queueItems.length - 1].user || 'viewer').replace(/^\s+|\s+$/g, '');
+                showRequestToast(last.title + ' requested by ' + requester);
+                spawnNotes();
+            }
+
+        }
+
+        function createEmptyState() {
+            var div = document.createElement('div');
+            div.className = 'empty-state';
+            div.innerHTML =
+                '<div class="vinyl-record"></div>' +
+                '<div class="empty-text">Waiting for requests</div>' +
+                '<div class="empty-subtext">Type !req Song - Artist</div>';
+            return div;
+        }
+
+        // ═══ SKIP METER ═══
+        function spawnSkipFloat() {
+            var circle = document.getElementById('skip-meter-circle');
+            var rect = circle.getBoundingClientRect();
+            var e = document.createElement('div');
+            e.className = 'skip-float';
+            e.textContent = '!SKIP';
+            e.style.left = (rect.left + rect.width / 2 - 20 + (Math.random() * 20 - 10)) + 'px';
+            e.style.top = (rect.top - 5 + Math.random() * 10) + 'px';
+            document.body.appendChild(e);
+            setTimeout(function() { e.remove(); }, 1500);
+        }
+
+        function spawnSkipBurst() {
+            var circle = document.getElementById('skip-meter-circle');
+            var rect = circle.getBoundingClientRect();
+            for (var i = 0; i < 8; i++) {
+                var p = document.createElement('div');
+                p.className = 'vote-particle';
+                var angle = (Math.PI * 2 / 8) * i;
+                var dist = 15 + Math.random() * 25;
+                p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
+                p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
+                p.style.left = (rect.left + rect.width / 2) + 'px';
+                p.style.top = (rect.top + rect.height / 2) + 'px';
+                p.style.position = 'fixed';
+                document.body.appendChild(p);
+                setTimeout(function(el) { el.remove(); }.bind(null, p), 700);
+            }
+        }
+
+        function triggerSkipRing() {
+            var r = document.getElementById('skip-ring');
+            r.classList.remove('active');
+            void r.offsetWidth;
+            r.classList.add('active');
+        }
+
+        function bumpSkipCount() {
+            var el = document.getElementById('skip-count');
+            el.classList.remove('bump');
+            void el.offsetWidth;
+            el.classList.add('bump');
+        }
+
+        function updateSkipMeter(data) {
+            var skips = data.skips;
+            var threshold = data.threshold;
+            var skippers = data.skippers || [];
+            var pct = Math.min((skips / threshold) * 100, 100);
+
+            var countEl = document.getElementById('skip-count');
+            var barFill = document.getElementById('skip-bar-fill');
+            var ofText = document.getElementById('skip-of-text');
+            var circleFill = document.getElementById('skip-circle-fill');
+            var warning = document.getElementById('skip-warning');
+            var badgeCount = document.getElementById('skip-count-badge');
+            var votingPanel = document.getElementById('voting-panel');
+            var modeEl = document.getElementById('skip-mode-text');
+
+            // Animate on new skip
+            if (skips > lastSkips) {
+                spawnSkipFloat();
+                spawnSkipBurst();
+                triggerSkipRing();
+                bumpSkipCount();
+                showSkipToast('Skip! (' + skips + '/' + threshold + ')');
+            }
+            lastSkips = skips;
+
+            // Update display
+            countEl.textContent = skips;
+            badgeCount.textContent = skips;
+            ofText.textContent = 'of ' + threshold;
+            if (modeEl) {
+                var mode = String((data && data.mode) || '').toLowerCase();
+                var modeLabel = 'Auto';
+                if (mode === 'manual') modeLabel = 'Manual';
+                else if (mode === 'fixed') modeLabel = 'Fixed';
+                modeEl.textContent = 'mode: ' + modeLabel;
+            }
+            barFill.style.width = pct + '%';
+
+            // Update circle progress
+            var offset = CIRCLE_CIRCUMFERENCE - (CIRCLE_CIRCUMFERENCE * pct / 100);
+            var circleEl = circleFill.querySelector('circle');
+            circleEl.style.strokeDashoffset = offset;
+
+            // Danger states
+            barFill.classList.toggle('danger', pct >= 50 && pct < 100);
+            barFill.classList.toggle('full', pct >= 100);
+            circleFill.classList.toggle('danger', pct >= 50 && pct < 100);
+            circleFill.classList.toggle('full', pct >= 100);
+            warning.classList.toggle('active', pct >= 100);
+            votingPanel.classList.toggle('threshold-flash', pct >= 100);
+            countEl.classList.toggle('glowing', pct >= 50);
+
+            // Render recent skippers
+            var container = document.getElementById('recent-skippers');
+            container.innerHTML = '';
+            skippers.forEach(function(name, i) {
+                var chip = document.createElement('div');
+                chip.className = 'skipper-chip';
+                chip.style.animationDelay = (i * 0.03) + 's';
+                chip.innerHTML = '<span class="skipper-icon">&#9197;</span>' + escapeHtml(name);
+                container.appendChild(chip);
+            });
+        }
+
+        // ═══ SOCKET ═══
+        var socket = io(window.location.origin, {
+            transports: ['polling', 'websocket'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 2000
+        });
+
+        socket.on('connect', function() {
+            console.log('✅ Connected to server');
+            try { socket.emit('request_state'); } catch (e) {}
+            if (!hadLiveConnection) {
+                hadLiveConnection = true;
+                if (demoStarted) stopDemoMode();
+                showConnectionBanner('Connected to server', 'connected');
+            }
+        });
+
+        socket.on('disconnect', function(reason) {
+            console.log('⚠️ Disconnected:', reason);
+            showConnectionBanner('Disconnected - reconnecting...', 'error');
+        });
+
+        socket.on('connect_error', function() {
+            if (!hadLiveConnection && !demoStarted) {
+                showConnectionBanner('Connection issue - retrying...', 'error');
+            }
+        });
+
+        socket.on('update_queue', function(data) { renderQueue(data); });
+
+        socket.on('update_ratings', function(data) {
+            if (data && data.reached) {
+                var vp = document.getElementById('voting-panel');
+                vp.classList.add('threshold-flash');
+                showSkipToast('Skip threshold reached!');
+                setTimeout(function() { vp.classList.remove('threshold-flash'); }, 1400);
+            }
+            updateSkipMeter(data);
+        });
+
+        socket.on('update_visibility', function(data) {
+            if (data && window.applyVisibility) window.applyVisibility(data);
+        });
+
+        socket.on('update_now_playing', function(data) { updateNowPlaying(data); });
+        socket.on('request_feedback', function(payload) {
+            if (!payload || typeof payload !== 'object') return;
+            var status = String(payload.status || '').toLowerCase();
+            var user = String(payload.user || 'Viewer');
+            var song = String(payload.song || 'request');
+            if (status === 'accepted') {
+                showRequestToast('Accepted: ' + song + ' (' + user + ')');
+            } else if (payload.reason === 'cooldown') {
+                var waitSec = Number(payload.wait_seconds || 0);
+                var waitTxt = waitSec > 0 ? ('Try again in ' + waitSec + 's') : 'Try again soon';
+                showRequestToast('Hold up ' + user + ' - ' + waitTxt);
+            } else if (payload.reason === 'duplicate_recent') {
+                showRequestToast('Already queued recently: ' + song);
+            }
+        });
+
+        // ═══ DEMO MODE ═══
+        function startDemoMode() {
+            if (demoStarted) return;
+            demoStarted = true;
+            console.log('⚠️ No backend — running demo');
+
+            var songs = [
+                { user: 'RockFan42', song: 'Enter Sandman by Metallica' },
+                { user: 'NightOwl', song: 'Bohemian Rhapsody by Queen' },
+                { user: 'VibeCheck', song: 'Smells Like Teen Spirit by Nirvana' },
+                { user: 'MusicLover', song: 'Sweet Child O Mine by Guns N Roses' },
+                { user: 'DarkSoul', song: 'Crawling In My Skin Tonight by Linkin Park' },
+                { user: 'ClassicRock', song: 'Stairway to Heaven by Led Zeppelin' },
+            ];
+            var queue = [], si = 0;
+            function addSong() {
+                if (si < songs.length && !hadLiveConnection) {
+                    queue.push(songs[si++]);
+                    renderQueue(queue.slice());
+                    demoTimers.push(setTimeout(addSong, 2500 + Math.random() * 2000));
+                }
+            }
+            addSong();
+
+            var demoSkips = 0;
+            var demoThreshold = 5;
+            var skipperNames = ['RockFan42', 'NightOwl', 'VibeCheck', 'MetalHead', 'ChillVibes', 'DarkSoul'];
+            var demoSkippers = [];
+            function addSkip() {
+                if (demoSkips < demoThreshold + 2 && !hadLiveConnection) {
+                    demoSkips++;
+                    var name = skipperNames[Math.floor(Math.random() * skipperNames.length)];
+                    demoSkippers.push(name);
+                    if (demoSkippers.length > 5) demoSkippers = demoSkippers.slice(-5);
+                    updateSkipMeter({ skips: demoSkips, threshold: demoThreshold, skippers: demoSkippers.slice() });
+                    demoTimers.push(setTimeout(addSkip, 1800 + Math.random() * 2500));
+                }
+            }
+            demoTimers.push(setTimeout(addSkip, 3000));
+        }
+
+        function stopDemoMode() {
+            demoTimers.forEach(function(t) { clearTimeout(t); });
+            demoTimers = [];
+            console.log('✅ Demo stopped — live connection established');
+        }
+
+        setTimeout(function() {
+            if (DEMO_MODE_ENABLED && !socket.connected && !demoStarted && !hadLiveConnection) {
+                startDemoMode();
+            }
+        }, 4000);
+
+        // ═══ MODERATOR BAR ═══
+        (function() {
+            var toggle = document.getElementById('mod-toggle');
+            var panel = document.getElementById('mod-panel');
+            var clearBtn = document.getElementById('mod-clear');
+            var resetBtn = document.getElementById('mod-reset');
+            var thresholdInput = document.getElementById('mod-threshold');
+            var thresholdSetBtn = document.getElementById('mod-threshold-set');
+            var thresholdAutoBtn = document.getElementById('mod-threshold-auto');
+            var feedback = document.getElementById('mod-feedback');
+            var visRequests = document.getElementById('vis-requests');
+            var visSkip = document.getElementById('vis-skip');
+            var loginBtn = document.getElementById('mod-login');
+            var pwInput = document.getElementById('mod-password');
+
+            var visibility = { requests: false, voting: true };
+
+            function applyVisibility(state) {
+                var reqPanel = document.querySelector('.requests-panel');
+                var votePanel = document.querySelector('.voting-panel');
+                if (reqPanel && !reqPanel.classList.contains('disabled-by-default')) {
+                    reqPanel.classList.add('disabled-by-default');
+                }
+                if (reqPanel) reqPanel.classList.toggle('hidden-panel', !state.requests);
+                if (votePanel) votePanel.classList.toggle('hidden-panel', !state.voting);
+                visRequests.checked = !!state.requests;
+                visSkip.checked = !!state.voting;
+            }
+
+            function setModPassword(pw) {
+                try { sessionStorage.setItem('modPassword', pw || ''); } catch(e) {}
+            }
+
+            function getModPassword() {
+                try { return sessionStorage.getItem('modPassword') || ''; } catch(e) { return ''; }
+            }
+
+            // Restore saved pw into the input if present
+            try { var saved = getModPassword(); if (saved && pwInput) pwInput.value = saved; } catch(e) {}
+
+            function sendVisibility() {
+                try {
+                    var pw = getModPassword();
+                    var payload = Object.assign({}, visibility, pw ? { password: pw } : {});
+                    socket.emit('set_visibility', payload, function(resp) {
+                        if (resp && resp.error) return showFeedback('Visibility error: ' + resp.error);
+                    });
+                } catch(e) {}
+            }
+
+            toggle.addEventListener('click', function() {
+                panel.classList.toggle('show');
+            });
+
+            function showFeedback(text) {
+                feedback.textContent = text;
+                feedback.classList.add('show');
+                setTimeout(function() { feedback.classList.remove('show'); }, 1800);
+            }
+
+            loginBtn && loginBtn.addEventListener('click', function() {
+                var v = pwInput ? pwInput.value || '' : '';
+                setModPassword(v);
+                showFeedback(v ? 'Password saved' : 'Password cleared');
+            });
+
+            clearBtn.addEventListener('click', function() {
+                var pw = getModPassword();
+                socket.emit('mod_clear', pw ? { password: pw } : {}, function(resp) {
+                    if (resp && resp.error) return showFeedback('Error: ' + resp.error);
+                    showFeedback('Queue cleared');
+                });
+            });
+
+            resetBtn.addEventListener('click', function() {
+                var pw = getModPassword();
+                socket.emit('mod_reset', pw ? { password: pw } : {}, function(resp) {
+                    if (resp && resp.error) return showFeedback('Error: ' + resp.error);
+                    showFeedback('Skip votes reset');
+                });
+            });
+
+            function sendThreshold(value) {
+                var v = String(value || '').trim();
+                if (!v) return showFeedback('Enter number or auto');
+                var pw = getModPassword();
+                var payload = { threshold: v };
+                if (pw) payload.password = pw;
+                socket.emit('mod_set_threshold', payload, function(resp) {
+                    if (resp && resp.error) return showFeedback('Error: ' + resp.error);
+                    if (resp && resp.threshold !== undefined) {
+                        showFeedback('Threshold ' + resp.threshold + ' (' + (resp.mode || 'auto') + ')');
+                    } else {
+                        showFeedback('Threshold updated');
+                    }
+                });
+            }
+
+            thresholdSetBtn && thresholdSetBtn.addEventListener('click', function() {
+                sendThreshold(thresholdInput ? thresholdInput.value : '');
+            });
+            thresholdAutoBtn && thresholdAutoBtn.addEventListener('click', function() {
+                sendThreshold('auto');
+                if (thresholdInput) thresholdInput.value = 'auto';
+            });
+            thresholdInput && thresholdInput.addEventListener('keydown', function(ev) {
+                if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    sendThreshold(thresholdInput.value);
+                }
+            });
+
+            visRequests.addEventListener('change', function() {
+                visibility.requests = visRequests.checked;
+                applyVisibility(visibility);
+                sendVisibility();
+            });
+
+            visSkip.addEventListener('change', function() {
+                visibility.voting = visSkip.checked;
+                applyVisibility(visibility);
+                sendVisibility();
+            });
+
+            window.applyVisibility = applyVisibility;
+            applyVisibility(visibility);
+        })();
+
+        // ═══ TESTING PANEL BEHAVIOR ═══
+        (function() {
+            var tToggle = document.getElementById('test-toggle');
+            var tPanel = document.getElementById('test-panel');
+            var tUser = document.getElementById('test-username');
+            var tMsg = document.getElementById('test-message');
+            var tIsMod = document.getElementById('test-is-mod');
+            var tSend = document.getElementById('test-send');
+            var tFeedback = document.getElementById('test-feedback');
+
+            if (!tToggle || !tPanel) return;
+
+            // restore state
+            try {
+                if (localStorage.getItem('testPanelOpen') === '1') tPanel.classList.add('show');
+            } catch(e) {}
+
+            tToggle.addEventListener('click', function() {
+                tPanel.classList.toggle('show');
+                try { localStorage.setItem('testPanelOpen', tPanel.classList.contains('show') ? '1' : '0'); } catch(e) {}
+            });
+
+            function showTestFeedback(msg) {
+                tFeedback.textContent = msg || 'Sent';
+                tFeedback.classList.add('show');
+                setTimeout(function() { tFeedback.classList.remove('show'); }, 1400);
+            }
+
+            function sendSimulated() {
+                var name = (tUser && tUser.value) ? tUser.value.trim() : 'TestUser';
+                var message = (tMsg && tMsg.value) ? tMsg.value.trim() : '';
+                var isMod = !!(tIsMod && tIsMod.checked);
+                if (!message) return showTestFeedback('Enter a message');
+
+                try {
+                    var pw = (function(){ try { return sessionStorage.getItem('modPassword') || ''; } catch(e){ return ''; } })();
+                    var payload = { nickname: name, unique_id: name.toLowerCase(), message: message, is_moderator: isMod };
+                    if (pw) payload.password = pw;
+                    socket.emit('simulate_comment', payload, function(resp) {
+                        if (resp && resp.error) {
+                            showTestFeedback('Error: ' + resp.error);
+                        } else {
+                            showTestFeedback('Sent');
+                            tMsg.value = '';
+                        }
+                    });
+                } catch(e) {
+                    showTestFeedback('Error');
+                }
+            }
+
+            tSend.addEventListener('click', sendSimulated);
+            tMsg.addEventListener('keydown', function(ev) { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendSimulated(); } });
+
+            // Show simulated chat in a simple way when server emits update_chat
+            socket.on('update_chat', function(payload) {
+                if (!payload) return;
+                var nick = payload.nickname || 'User';
+                var msg = payload.message || '';
+                // brief highlight: show request/skips toasts if commands
+                if (msg.toLowerCase().startsWith('!req ')) {
+                    showRequestToast(msg.replace(/^!req\s+/i, ''));
+                    spawnNotes();
+                } else if (msg.toLowerCase() === '!skip') {
+                    showSkipToast('Skip vote');
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
+
+
+
+
+
+

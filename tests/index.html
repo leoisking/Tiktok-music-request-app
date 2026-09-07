@@ -1,0 +1,2081 @@
+<!doctype html>
+<!--
+    ╔═══════════════════════════════════════════════════════════╗
+    ║       MIDLIFE DISASTER — COMBINED LIVE WIDGET             ║
+    ║                                                           ║
+    ║  SETUP:                                                   ║
+    ║  1. python live_widget.py                                 ║
+    ║  2. cloudflared tunnel --url http://localhost:5000         ║
+    ║  3. Paste the URL in TikTok Studio overlay                ║
+    ║                                                           ║
+    ║  COMMANDS:                                                ║
+    ║  • !req song name by artist — request a song              ║
+    ║  • Type "!skip" — vote to skip current song               ║
+    ║  • !clear — clear requests (mods only)                    ║
+    ║  • !reset / !next — reset skip votes (mods only)          ║
+    ╚═══════════════════════════════════════════════════════════╝
+-->
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Midlife Disaster — Live</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Montserrat:wght@400;600;700;800;900&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            body,
+            html {
+                background: transparent !important;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                font-family: "Montserrat", sans-serif;
+                line-height: 1.2;
+            }
+
+            /* ═══ PARTICLES ═══ */
+            .bg-particles {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 0;
+            }
+            .particle {
+                position: absolute;
+                background: white;
+                border-radius: 50%;
+                opacity: 0;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .particle {
+                    animation: floatUp 10s linear infinite;
+                }
+            }
+            @keyframes floatUp {
+                0% {
+                    opacity: 0;
+                    transform: translateY(100vh) scale(0);
+                }
+                10% {
+                    opacity: 0.3;
+                }
+                90% {
+                    opacity: 0.1;
+                }
+                100% {
+                    opacity: 0;
+                    transform: translateY(-10vh) scale(1);
+                }
+            }
+
+            /* ═══ MAIN LAYOUT — SIDE BY SIDE ═══ */
+            .widget-wrapper {
+                position: relative;
+                z-index: 1;
+                display: flex;
+                gap: 8px;
+                padding: 8px;
+                width: 100%;
+                height: 100vh;
+                min-height: 300px;
+            }
+
+            @media (max-width: 768px) and (orientation: portrait) {
+                .widget-wrapper {
+                    flex-direction: column;
+                    padding: 6px;
+                    gap: 6px;
+                }
+                .requests-panel {
+                    flex: 1.2;
+                }
+                .voting-panel {
+                    flex: 0.9;
+                }
+                .chat-panel {
+                    display: none;
+                }
+                .panel-header {
+                    padding: 8px 10px 6px;
+                }
+                .skip-meter-circle {
+                    width: 120px;
+                    height: 120px;
+                }
+                .skip-count {
+                    font-size: 30px;
+                }
+            }
+
+            /* ═══ SHARED PANEL STYLES ═══ */
+            .panel-card {
+                position: relative;
+                background: rgba(8, 8, 8, 0.94);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            }
+
+            .panel-card .border-glow {
+                position: absolute;
+                top: -1px;
+                left: -1px;
+                right: -1px;
+                bottom: -1px;
+                border-radius: 13px;
+                pointer-events: none;
+                z-index: 0;
+                overflow: hidden;
+            }
+            .panel-card .border-glow::before {
+                content: "";
+                position: absolute;
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: conic-gradient(
+                    from 0deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.12),
+                    transparent,
+                    rgba(255, 255, 255, 0.06),
+                    transparent
+                );
+                animation: none;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .panel-card .border-glow::before {
+                    animation: rotateBorder 3s linear infinite;
+                }
+            }
+            @keyframes rotateBorder {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            .panel-card .border-glow::after {
+                content: "";
+                position: absolute;
+                top: 1px;
+                left: 1px;
+                right: 1px;
+                bottom: 1px;
+                background: rgba(8, 8, 8, 0.94);
+                border-radius: 11px;
+            }
+
+            .panel-inner {
+                position: relative;
+                z-index: 1;
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+                overflow: hidden;
+            }
+
+            .glow-line {
+                height: 2px;
+                flex-shrink: 0;
+                background: linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.25),
+                    rgba(255, 255, 255, 0.5),
+                    rgba(255, 255, 255, 0.25),
+                    transparent
+                );
+                animation: none;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .glow-line {
+                    animation: glowPulse 2s ease-in-out infinite;
+                }
+            }
+            @keyframes glowPulse {
+                0%,
+                100% {
+                    opacity: 0.5;
+                }
+                50% {
+                    opacity: 1;
+                }
+            }
+
+            /* ═══ PANEL HEADERS ═══ */
+            .panel-header {
+                padding: 10px 12px 8px;
+                text-align: center;
+                position: relative;
+                background: linear-gradient(
+                    180deg,
+                    rgba(255, 255, 255, 0.02) 0%,
+                    transparent 100%
+                );
+                flex-shrink: 0;
+            }
+            /* ═══ CHAT PANEL ═══ */
+            .chat-panel {
+                flex: 1;
+                min-width: 0;
+            }
+            .chat-list {
+                flex: 1;
+                overflow-y: auto;
+                padding: 8px;
+                display: flex;
+                flex-direction: column-reverse;
+                gap: 6px;
+                min-height: 0;
+            }
+            .chat-message {
+                opacity: 0;
+                transform: translateY(6px);
+                transition:
+                    opacity 0.9s ease,
+                    transform 0.9s ease;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.04);
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 12px;
+                color: rgba(255, 255, 255, 0.9);
+            }
+            .chat-message.show {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            .chat-message.cmd {
+                border-left: 3px solid rgba(255, 255, 255, 0.25);
+            }
+            .chat-message.skip {
+                border-left: 3px solid rgba(255, 255, 255, 0.5);
+            }
+
+            /* ═══ MODERATOR BAR ═══ */
+            .mod-bar {
+                position: fixed;
+                left: 12px;
+                bottom: 12px;
+                z-index: 300;
+            }
+            .mod-toggle {
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: rgba(255, 255, 255, 0.85);
+                padding: 6px 10px;
+                border-radius: 8px;
+                font-weight: 800;
+                cursor: pointer;
+            }
+            .mod-panel {
+                margin-top: 8px;
+                background: rgba(0, 0, 0, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                padding: 8px;
+                border-radius: 8px;
+                display: none;
+                gap: 6px;
+                width: 160px;
+            }
+            .mod-panel.show {
+                display: flex;
+                flex-direction: column;
+            }
+            .mod-btn {
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                color: rgba(255, 255, 255, 0.9);
+                padding: 6px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 800;
+            }
+            .mod-feedback {
+                margin-top: 6px;
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.9);
+                opacity: 0;
+                transition: opacity 0.4s ease;
+            }
+            .mod-feedback.show {
+                opacity: 1;
+            }
+
+            /* ═══ CONNECTION BANNER ═══ */
+            .conn-banner {
+                position: fixed;
+                top: 14px;
+                left: 50%;
+                transform: translateX(-50%) translateY(-10px);
+                background: rgba(0, 0, 0, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 8px 12px;
+                border-radius: 10px;
+                color: rgba(255, 255, 255, 0.95);
+                z-index: 400;
+                opacity: 0;
+                transition:
+                    opacity 0.6s ease,
+                    transform 0.6s ease;
+                pointer-events: none;
+            }
+            .conn-banner.show {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+                .hidden-panel { display: none !important; }
+            .panel-header::after {
+                content: "";
+                position: absolute;
+                bottom: 0;
+                left: 10%;
+                width: 80%;
+                height: 1px;
+                background: linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.15),
+                    rgba(255, 255, 255, 0.3),
+                    rgba(255, 255, 255, 0.15),
+                    transparent
+                );
+            }
+            .panel-title {
+                font-family: "Cinzel", serif;
+                color: #f8f8f8;
+                font-size: 16px;
+                font-weight: 900;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .panel-title {
+                    animation: titleGlow 4s ease-in-out infinite;
+                }
+            }
+            @keyframes titleGlow {
+                0%,
+                100% {
+                    text-shadow: 0 0 8px rgba(255, 255, 255, 0.08);
+                }
+                50% {
+                    text-shadow: 0 0 15px rgba(255, 255, 255, 0.15);
+                }
+            }
+            .panel-subtitle {
+                font-size: 12px;
+                color: rgba(255, 255, 255, 0.75);
+                letter-spacing: 1.2px;
+                text-transform: uppercase;
+                margin-top: 4px;
+                font-weight: 600;
+            }
+            .header-badges {
+                display: flex;
+                justify-content: center;
+                gap: 6px;
+                margin-top: 6px;
+            }
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 3px 8px;
+                border-radius: 12px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 1.2px;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.8);
+            }
+            .badge-number {
+                font-weight: 900;
+                color: rgba(255, 255, 255, 0.95);
+            }
+            .live-dot {
+                width: 5px;
+                height: 5px;
+                background: #fff;
+                border-radius: 50%;
+                box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .live-dot {
+                    animation: livePulse 1.5s ease-in-out infinite;
+                }
+            }
+            @keyframes livePulse {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.3;
+                }
+            }
+
+            /* ═══ LEFT: SONG REQUESTS ═══ */
+            .requests-panel {
+                flex: 4;
+                min-width: 0;
+            }
+
+            .request-list {
+                flex: 1;
+                overflow-y: auto;
+                padding: 6px 8px;
+                scroll-behavior: smooth;
+                min-height: 0;
+            }
+            .request-list::-webkit-scrollbar {
+                width: 2px;
+            }
+            .request-list::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .request-list::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.12);
+                border-radius: 10px;
+            }
+
+            .empty-state {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 30px 10px;
+                opacity: 0.5;
+            }
+            .vinyl-record {
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                margin-bottom: 8px;
+                position: relative;
+                background: radial-gradient(
+                    circle at center,
+                    rgba(255, 255, 255, 0.12) 15%,
+                    transparent 16%,
+                    transparent 35%,
+                    rgba(255, 255, 255, 0.03) 36%,
+                    rgba(255, 255, 255, 0.03) 48%,
+                    transparent 49%
+                );
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .vinyl-record {
+                    animation: vinylSpin 4s linear infinite;
+                }
+            }
+            .vinyl-record::before {
+                content: "";
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.2);
+            }
+            @keyframes vinylSpin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            .empty-text {
+                font-family: "Cinzel", serif;
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+            }
+            .empty-subtext {
+                color: rgba(255, 255, 255, 0.55);
+                font-size: 10px;
+                letter-spacing: 1px;
+                margin-top: 4px;
+                text-align: center;
+            }
+
+            .request-item {
+                position: relative;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 6px;
+                padding: 7px 8px 7px 10px;
+                margin-bottom: 4px;
+                border-left: 2px solid rgba(255, 255, 255, 0.1);
+                transition: all 0.3s ease;
+                overflow: hidden;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .request-item {
+                    animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+                }
+            }
+            .request-item.newest {
+                border-left-color: rgba(255, 255, 255, 0.5);
+                background: rgba(255, 255, 255, 0.04);
+            }
+            .request-item.flash {
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .request-item.flash {
+                    animation:
+                        slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both,
+                        flashIn 0.8s ease-out;
+                }
+            }
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateX(-15px) scale(0.97);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateX(0) scale(1);
+                }
+            }
+            @keyframes flashIn {
+                0% {
+                    background: rgba(255, 255, 255, 0.12);
+                    border-left-color: rgba(255, 255, 255, 0.8);
+                }
+                100% {
+                    background: rgba(255, 255, 255, 0.04);
+                }
+            }
+
+            .item-number {
+                position: absolute;
+                right: 6px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 22px;
+                font-weight: 900;
+                color: rgba(255, 255, 255, 0.03);
+                line-height: 1;
+                pointer-events: none;
+            }
+            .song-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                position: relative;
+                z-index: 1;
+            }
+            .song-icon {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                font-size: 11px;
+                filter: grayscale(1) brightness(1.2);
+            }
+            .song-details {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+            }
+            .song-name {
+                color: #fff;
+                font-size: 13px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.2px;
+                line-height: 1.25;
+                overflow: hidden;
+                position: relative;
+            }
+            /* Scrolling marquee for long song names */
+            .song-name-inner {
+                display: inline-block;
+                white-space: nowrap;
+            }
+            .song-name-inner.scrolling {
+                animation: none;
+                padding-right: 30px;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .song-name-inner.scrolling {
+                    animation: marqueeScroll 8s linear infinite;
+                }
+            }
+            @keyframes marqueeScroll {
+                0%,
+                15% {
+                    transform: translateX(0);
+                }
+                85%,
+                100% {
+                    transform: translateX(calc(-100% + 80px));
+                }
+            }
+            .artist-name {
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 11px;
+                font-weight: 600;
+                font-style: italic;
+                margin-top: 2px;
+            }
+            .user-tag {
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                margin-top: 3px;
+                padding: 2px 7px;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+                position: relative;
+                z-index: 1;
+            }
+            .new-badge {
+                display: inline-block;
+                padding: 1px 4px;
+                border-radius: 2px;
+                background: rgba(255, 255, 255, 0.12);
+                color: rgba(255, 255, 255, 0.85);
+                font-size: 7px;
+                font-weight: 900;
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                margin-left: 4px;
+                animation: none;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .new-badge {
+                    animation: badgePulse 1s ease-in-out infinite;
+                }
+            }
+            @keyframes badgePulse {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.4;
+                }
+            }
+
+            .eq-bars {
+                display: flex;
+                align-items: flex-end;
+                gap: 1px;
+                height: 10px;
+                flex-shrink: 0;
+            }
+            .eq-bar {
+                width: 2px;
+                background: rgba(255, 255, 255, 0.3);
+                border-radius: 1px;
+                animation: none;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .eq-bar {
+                    animation: eqBounce 1.2s ease-in-out infinite;
+                }
+            }
+            .eq-bar:nth-child(1) {
+                height: 3px;
+                animation-delay: 0s;
+            }
+            .eq-bar:nth-child(2) {
+                height: 6px;
+                animation-delay: 0.12s;
+            }
+            .eq-bar:nth-child(3) {
+                height: 4px;
+                animation-delay: 0.24s;
+            }
+            .eq-bar:nth-child(4) {
+                height: 7px;
+                animation-delay: 0.36s;
+            }
+            @keyframes eqBounce {
+                0%,
+                100% {
+                    transform: scaleY(0.3);
+                }
+                50% {
+                    transform: scaleY(1);
+                }
+            }
+
+            /* ═══ RIGHT: SKIP METER ═══ */
+            .voting-panel {
+                flex: 2.5;
+                min-width: 0;
+            }
+
+            .voting-content {
+                flex: 1;
+                padding: 8px 10px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 8px;
+            }
+
+            .compact-skip {
+                width: min(170px, 26vw);
+                max-width: 180px;
+                margin: 0 auto;
+                align-self: center;
+            }
+            .compact-skip .panel-inner {
+                padding: 8px 10px;
+            }
+            .compact-skip .panel-header,
+            .compact-skip .header-badges,
+            .compact-skip .skip-bar-section,
+            .compact-skip .skip-warning,
+            .compact-skip .recent-skippers,
+            .compact-skip .panel-footer {
+                display: none !important;
+            }
+            .compact-skip .voting-content {
+                padding: 4px 8px 6px;
+                gap: 8px;
+            }
+            .compact-skip .skip-command-hint {
+                margin-top: 0;
+                gap: 6px;
+            }
+            .compact-skip .skip-command-box {
+                padding: 4px 10px;
+                font-size: 16px;
+                letter-spacing: 1.6px;
+            }
+            .compact-skip .skip-command-arrow {
+                font-size: 10px;
+            }
+            .compact-skip .skip-meter-circle {
+                width: 90px;
+                height: 90px;
+                margin: 0 auto;
+            }
+            .compact-skip .skip-circle-bg circle,
+            .compact-skip .skip-circle-fill circle {
+                stroke-width: 4;
+            }
+            .compact-skip .skip-emoji {
+                font-size: 16px;
+                margin-bottom: 0;
+            }
+            .compact-skip .skip-count {
+                font-size: 30px;
+            }
+            .compact-skip .skip-of-text {
+                display: none;
+            }
+
+            /* Call to action */
+            .skip-cta {
+                text-align: center;
+                padding: 0 4px;
+            }
+            .skip-cta-text {
+                font-family: "Cinzel", serif;
+                font-size: 11px;
+                font-weight: 900;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.5);
+                animation: ctaPulse 3s ease-in-out infinite;
+            }
+            @keyframes ctaPulse {
+                0%,
+                100% {
+                    opacity: 0.4;
+                }
+                50% {
+                    opacity: 0.7;
+                }
+            }
+
+            /* Command hint */
+            .skip-command-hint {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                margin-top: 4px;
+            }
+            .skip-command-box {
+                display: inline-block;
+                padding: 3px 10px;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                font-family: "Montserrat", sans-serif;
+                font-size: 14px;
+                font-weight: 900;
+                color: rgba(255, 255, 255, 0.9);
+                letter-spacing: 2px;
+                animation: commandPulse 2s ease-in-out infinite;
+            }
+            @keyframes commandPulse {
+                0%,
+                100% {
+                    background: rgba(255, 255, 255, 0.08);
+                    border-color: rgba(255, 255, 255, 0.15);
+                    box-shadow: none;
+                }
+                50% {
+                    background: rgba(255, 255, 255, 0.12);
+                    border-color: rgba(255, 255, 255, 0.3);
+                    box-shadow: 0 0 12px rgba(255, 255, 255, 0.08);
+                }
+            }
+            .skip-command-arrow {
+                font-size: 10px;
+                color: rgba(255, 255, 255, 0.4);
+                animation: arrowBounce 1.5s ease-in-out infinite;
+            }
+            @keyframes arrowBounce {
+                0%,
+                100% {
+                    transform: translateX(0);
+                    opacity: 0.3;
+                }
+                50% {
+                    transform: translateX(3px);
+                    opacity: 0.7;
+                }
+            }
+
+            /* Skip meter circle */
+            .skip-meter-circle {
+                position: relative;
+                width: 140px;
+                height: 140px;
+                margin: 0 auto;
+            }
+            .skip-circle-bg {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+            }
+            .skip-circle-bg circle {
+                fill: none;
+                stroke: rgba(255, 255, 255, 0.06);
+                stroke-width: 6;
+            }
+            .skip-circle-fill {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                transform: rotate(-90deg);
+                transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .skip-circle-fill circle {
+                fill: none;
+                stroke: rgba(255, 255, 255, 0.25);
+                stroke-width: 6;
+                stroke-linecap: round;
+                stroke-dasharray: 339.292;
+                stroke-dashoffset: 339.292;
+                transition:
+                    stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                    stroke 0.4s ease;
+            }
+            .skip-circle-fill.danger circle {
+                stroke: rgba(255, 255, 255, 0.45);
+            }
+            .skip-circle-fill.full circle {
+                stroke: rgba(255, 255, 255, 0.7);
+                filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.3));
+            }
+
+            /* Center content inside circle */
+            .skip-meter-center {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                z-index: 1;
+            }
+            .skip-emoji {
+                font-size: 24px;
+                filter: grayscale(1) brightness(1.3);
+                display: block;
+                margin-bottom: 2px;
+                animation: skipEmojiBounce 3s ease-in-out infinite;
+            }
+            @keyframes skipEmojiBounce {
+                0%,
+                100% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.1);
+                }
+            }
+            .skip-count {
+                font-family: "Montserrat", sans-serif;
+                font-size: 34px;
+                font-weight: 900;
+                color: #fff;
+                line-height: 1;
+                transition: all 0.3s ease;
+            }
+            .skip-count.bump {
+                animation: countBump 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            @keyframes countBump {
+                0% {
+                    transform: scale(1);
+                }
+                35% {
+                    transform: scale(1.3);
+                }
+                100% {
+                    transform: scale(1);
+                }
+            }
+            .skip-count.glowing {
+                text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+            }
+            .skip-of-text {
+                font-size: 10px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.5);
+                letter-spacing: 1px;
+                margin-top: 1px;
+            }
+
+            /* Pulse ring for skip votes */
+            .skip-pulse-ring {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 40px;
+                height: 40px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 50%;
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 0;
+                pointer-events: none;
+                z-index: 2;
+            }
+            .skip-pulse-ring.active {
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .skip-pulse-ring.active {
+                    animation: ringExpand 0.8s ease-out forwards;
+                }
+            }
+            @keyframes ringExpand {
+                0% {
+                    transform: translate(-50%, -50%) scale(0);
+                    opacity: 0.7;
+                }
+                100% {
+                    transform: translate(-50%, -50%) scale(3);
+                    opacity: 0;
+                }
+            }
+
+            /* Skip progress bar (secondary) */
+            .skip-bar-section {
+                padding: 0 2px;
+            }
+            .skip-bar-wrap {
+                width: 100%;
+                height: 10px;
+                background: rgba(255, 255, 255, 0.04);
+                border-radius: 5px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                overflow: hidden;
+                position: relative;
+            }
+            .skip-bar-fill {
+                height: 100%;
+                width: 0%;
+                background: linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0.1),
+                    rgba(255, 255, 255, 0.3)
+                );
+                border-radius: 5px;
+                transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .skip-bar-fill::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.1),
+                    transparent
+                );
+                animation: shimmer 3s ease-in-out infinite;
+            }
+            @keyframes shimmer {
+                0% {
+                    transform: translateX(-100%);
+                }
+                100% {
+                    transform: translateX(100%);
+                }
+            }
+            .skip-bar-fill.danger {
+                background: linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0.2),
+                    rgba(255, 255, 255, 0.5)
+                );
+            }
+            .skip-bar-fill.full {
+                background: linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0.3),
+                    rgba(255, 255, 255, 0.7)
+                );
+            }
+
+            .skip-bar-labels {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 3px;
+                padding: 0 2px;
+            }
+            .skip-bar-label {
+                font-size: 9px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.5);
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+            }
+
+            /* Skip threshold warning */
+            .skip-warning {
+                text-align: center;
+                overflow: hidden;
+                max-height: 0;
+                opacity: 0;
+                transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .skip-warning.active {
+                max-height: 50px;
+                opacity: 1;
+            }
+            .skip-warning-inner {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                padding: 6px 10px;
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                animation: warningPulse 0.8s ease-in-out infinite;
+            }
+            @keyframes warningPulse {
+                0%,
+                100% {
+                    border-color: rgba(255, 255, 255, 0.2);
+                    background: rgba(255, 255, 255, 0.08);
+                }
+                50% {
+                    border-color: rgba(255, 255, 255, 0.5);
+                    background: rgba(255, 255, 255, 0.12);
+                    box-shadow: 0 0 20px rgba(255, 255, 255, 0.08);
+                }
+            }
+            .skip-warning-text {
+                font-size: 12px;
+                font-weight: 900;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.95);
+            }
+            .skip-warning-icon {
+                font-size: 12px;
+                filter: grayscale(1) brightness(1.3);
+                animation: iconShake 0.3s ease-in-out infinite;
+            }
+            @keyframes iconShake {
+                0%,
+                100% {
+                    transform: rotate(0deg);
+                }
+                25% {
+                    transform: rotate(-12deg);
+                }
+                75% {
+                    transform: rotate(12deg);
+                }
+            }
+
+            /* Recent skippers */
+            .recent-skippers {
+                display: flex;
+                justify-content: center;
+                gap: 3px;
+                flex-wrap: wrap;
+                padding: 2px 2px 0;
+            }
+            .skipper-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 2px;
+                padding: 2px 6px;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                font-size: 8px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.5);
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                animation: chipIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            @keyframes chipIn {
+                from {
+                    opacity: 0;
+                    transform: scale(0.8);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
+            .skipper-icon {
+                font-size: 8px;
+                filter: grayscale(1) brightness(1.3);
+            }
+
+            /* ═══ PANEL FOOTERS ═══ */
+            .panel-footer {
+                padding: 4px 8px;
+                text-align: center;
+                border-top: 1px solid rgba(255, 255, 255, 0.04);
+                background: rgba(0, 0, 0, 0.2);
+                flex-shrink: 0;
+            }
+            .footer-text {
+                color: rgba(255, 255, 255, 0.35);
+                font-size: 9px;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                font-weight: 600;
+            }
+
+            /* ═══ FLOATING EFFECTS ═══ */
+            .note-float {
+                position: fixed;
+                font-size: 14px;
+                pointer-events: none;
+                z-index: 100;
+                color: rgba(255, 255, 255, 0.3);
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .note-float {
+                    animation: noteRise 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                }
+            }
+            @keyframes noteRise {
+                0% {
+                    opacity: 0.6;
+                    transform: translateY(0) rotate(0deg) scale(1);
+                }
+                100% {
+                    opacity: 0;
+                    transform: translateY(-80px) rotate(20deg) scale(0.2);
+                }
+            }
+            .skip-float {
+                position: fixed;
+                font-size: 14px;
+                pointer-events: none;
+                z-index: 100;
+                font-family: "Montserrat", sans-serif;
+                font-weight: 900;
+                color: rgba(255, 255, 255, 0.6);
+                letter-spacing: 3px;
+                text-transform: uppercase;
+                animation: skipFloatUp 1.5s cubic-bezier(0.16, 1, 0.3, 1)
+                    forwards;
+            }
+            @keyframes skipFloatUp {
+                0% {
+                    opacity: 0.9;
+                    transform: translateY(0) scale(1.2);
+                }
+                100% {
+                    opacity: 0;
+                    transform: translateY(-80px) scale(0.4);
+                }
+            }
+            .vote-particle {
+                position: absolute;
+                width: 3px;
+                height: 3px;
+                background: rgba(255, 255, 255, 0.6);
+                border-radius: 50%;
+                pointer-events: none;
+                z-index: 10;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .vote-particle {
+                    animation: particleBurst 0.7s ease-out forwards;
+                }
+            }
+            @keyframes particleBurst {
+                0% {
+                    opacity: 1;
+                    transform: translate(0, 0) scale(1);
+                }
+                100% {
+                    opacity: 0;
+                    transform: translate(var(--px), var(--py)) scale(0);
+                }
+            }
+
+            /* ═══ PANEL TOASTS ═══ */
+            .panel-toast {
+                position: absolute;
+                top: 6px;
+                left: 50%;
+                transform: translateX(-50%) translateY(-40px);
+                background: rgba(10, 10, 10, 0.95);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 14px;
+                padding: 4px 10px;
+                z-index: 200;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                transition:
+                    transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                    opacity 0.4s ease;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+                opacity: 0;
+                pointer-events: none;
+                white-space: nowrap;
+            }
+            .panel-toast.show {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+            .panel-toast-icon {
+                font-size: 10px;
+                filter: grayscale(1) brightness(1.3);
+            }
+            .panel-toast-text {
+                font-size: 10px;
+                font-weight: 900;
+                color: rgba(255, 255, 255, 0.9);
+                letter-spacing: 1px;
+                text-transform: uppercase;
+            }
+
+            /* ═══ FULL PANEL FLASH ON THRESHOLD ═══ */
+            .voting-panel.threshold-flash .border-glow::before {
+                background: conic-gradient(
+                    from 0deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.3),
+                    transparent,
+                    rgba(255, 255, 255, 0.15),
+                    transparent
+                );
+                animation: rotateBorder 4s linear infinite;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="bg-particles" id="particles"></div>
+
+        <div class="widget-wrapper">
+            <!-- LEFT: SONG REQUESTS -->
+            <div class="panel-card requests-panel">
+                <div class="border-glow"></div>
+                <div class="panel-toast" id="request-toast">
+                    <span class="panel-toast-icon">🎵</span>
+                    <span
+                        class="panel-toast-text"
+                        id="request-toast-msg"
+                    ></span>
+                </div>
+                <div class="panel-inner">
+                    <div class="glow-line"></div>
+                    <div class="panel-header">
+                        <div class="panel-title">🎵 Song Requests</div>
+                        <div class="panel-subtitle">
+                            Type !req song by artist
+                        </div>
+                        <div class="header-badges">
+                            <div class="badge">
+                                <span class="live-dot"></span> Live
+                            </div>
+                            <div class="badge">
+                                <span class="badge-number" id="request-count"
+                                    >0</span
+                                >
+                                Reqs
+                            </div>
+                        </div>
+                    </div>
+                    <div class="request-list" id="request-list">
+                        <div class="empty-state">
+                            <div class="vinyl-record"></div>
+                            <div class="empty-text">Waiting for requests</div>
+                            <div class="empty-subtext>
+                                Type !req song name and artist
+                            </div>
+                        </div>
+                    </div>
+                    <div class="panel-footer">
+                        <div class="footer-text">♪ Midlife Disaster ♪</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MIDDLE: FILTERED CHAT -->
+            <div class="panel-card chat-panel">
+                <div class="border-glow"></div>
+                <div class="panel-inner">
+                    <div class="glow-line"></div>
+                    <div class="panel-header">
+                        <div class="panel-title">💬 Filtered Chat</div>
+                        <div class="panel-subtitle">Commands & Skips</div>
+                    </div>
+                    <div class="chat-list" id="chat-list">
+                        <!-- messages appended here -->
+                    </div>
+                    <div class="panel-footer">
+                        <div class="footer-text">
+                            Filtered: command/skip messages only
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: SKIP METER -->
+            <div class="panel-card voting-panel compact-skip" id="voting-panel">
+                <div class="border-glow"></div>
+                <div class="panel-toast" id="skip-toast">
+                    <span class="panel-toast-icon">⏭️</span>
+                    <span class="panel-toast-text" id="skip-toast-msg"></span>
+                </div>
+                <div class="panel-inner">
+                    <div class="glow-line"></div>
+                    <div class="panel-header">
+                        <div class="panel-title">⏭️ Skip Meter</div>
+                        <div class="panel-subtitle">Don't like this song?</div>
+                        <div class="header-badges">
+                            <div class="badge">
+                                <span class="badge-number" id="skip-count-badge"
+                                    >0</span
+                                >
+                                Skips
+                            </div>
+                        </div>
+                    </div>
+                    <div class="voting-content">
+                        <!-- Call to action -->
+                        <div class="skip-cta">
+                            <div class="skip-command-hint">
+                                <span class="skip-command-arrow">▶</span>
+                                <span class="skip-command-box">skip</span>
+                                <span
+                                    class="skip-command-arrow"
+                                    style="transform: scaleX(-1)"
+                                    >▶</span
+                                >
+                            </div>
+                        </div>
+
+                        <!-- Circular skip meter -->
+                        <div class="skip-meter-circle" id="skip-meter-circle">
+                            <div class="skip-pulse-ring" id="skip-ring"></div>
+                            <!-- Background circle -->
+                            <svg class="skip-circle-bg" viewBox="0 0 120 120">
+                                <circle cx="60" cy="60" r="54"></circle>
+                            </svg>
+                            <!-- Progress circle -->
+                            <svg
+                                class="skip-circle-fill"
+                                id="skip-circle-fill"
+                                viewBox="0 0 120 120"
+                            >
+                                <circle cx="60" cy="60" r="54"></circle>
+                            </svg>
+                            <!-- Center content -->
+                            <div class="skip-meter-center">
+                                <span class="skip-emoji">⏭️</span>
+                                <div class="skip-count" id="skip-count">0</div>
+                                <div class="skip-of-text" id="skip-of-text">
+                                    of 10
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Progress bar -->
+                        <div class="skip-bar-section">
+                            <div class="skip-bar-wrap">
+                                <div
+                                    class="skip-bar-fill"
+                                    id="skip-bar-fill"
+                                ></div>
+                            </div>
+                            <div class="skip-bar-labels">
+                                <span class="skip-bar-label">Playing</span>
+                                <span class="skip-bar-label">Skip →</span>
+                            </div>
+                        </div>
+
+                        <!-- Skip warning -->
+                        <div class="skip-warning" id="skip-warning">
+                            <div class="skip-warning-inner">
+                                <span class="skip-warning-icon">⚠️</span>
+                                <span class="skip-warning-text">Skip it!</span>
+                                <span class="skip-warning-icon">⚠️</span>
+                            </div>
+                        </div>
+
+                        <!-- Recent skippers -->
+                        <div class="recent-skippers" id="recent-skippers"></div>
+                    </div>
+                    <div class="panel-footer">
+                        <div class="footer-text">⚡ Midlife Disaster ⚡</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+        <script>
+            // Connection / demo tracking
+            let hadLiveConnection = false;
+            let demoStarted = false;
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            // ═══ PARTICLES ═══
+            function createParticles() {
+                const c = document.getElementById("particles");
+                if (prefersReducedMotion) return;
+                for (let i = 0; i < 15; i++) {
+                    const p = document.createElement("div");
+                    p.className = "particle";
+                    p.style.left = Math.random() * 100 + "%";
+                    p.style.width = p.style.height =
+                        Math.random() * 2 + 1 + "px";
+                    p.style.animationDuration = Math.random() * 10 + 8 + "s";
+                    p.style.animationDelay = Math.random() * 8 + "s";
+                    c.appendChild(p);
+                }
+            }
+            createParticles();
+
+            // ═══ PANEL TOASTS ═══
+            let requestToastTimer = null;
+            let skipToastTimer = null;
+
+            function showRequestToast(msg) {
+                const toast = document.getElementById("request-toast");
+                document.getElementById("request-toast-msg").textContent = msg;
+                toast.classList.add("show");
+                clearTimeout(requestToastTimer);
+                requestToastTimer = setTimeout(
+                    () => toast.classList.remove("show"),
+                    2500,
+                );
+            }
+
+            function showSkipToast(msg) {
+                const toast = document.getElementById("skip-toast");
+                document.getElementById("skip-toast-msg").textContent = msg;
+                toast.classList.add("show");
+                clearTimeout(skipToastTimer);
+                skipToastTimer = setTimeout(
+                    () => toast.classList.remove("show"),
+                    2500,
+                );
+            }
+
+            // ═══ CHAT FLOW ═══
+            const CHAT_LIFECYCLE_MS = 6000; // total: fade-in + dwell + fade-out
+
+            function appendChatMessage(text, type) {
+                const list = document.getElementById("chat-list");
+                const el = document.createElement("div");
+                el.className = "chat-message " + (type || "cmd");
+                el.textContent = text;
+                // insert at top visually (we use column-reverse)
+                list.appendChild(el);
+
+                // force layout then show
+                requestAnimationFrame(() => {
+                    el.classList.add("show");
+                });
+
+                // schedule hide and removal
+                const fadeOutAt = CHAT_LIFECYCLE_MS - 900; // leave 900ms for fade-out transition
+                setTimeout(() => {
+                    el.classList.remove("show");
+                    setTimeout(() => el.remove(), 1000);
+                }, fadeOutAt);
+            }
+
+            // ═══ SONG REQUESTS ═══
+            let previousCount = 0;
+
+            function spawnNotes() {
+                if (prefersReducedMotion) return;
+                const notes = ["♪", "♫", "♩", "♬"];
+                const panel = document.querySelector(".requests-panel");
+                const rect = panel.getBoundingClientRect();
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        const note = document.createElement("div");
+                        note.className = "note-float";
+                        note.textContent =
+                            notes[Math.floor(Math.random() * notes.length)];
+                        note.style.left =
+                            rect.left +
+                            10 +
+                            Math.random() * (rect.width - 20) +
+                            "px";
+                        note.style.top =
+                            rect.top +
+                            rect.height * 0.3 +
+                            Math.random() * 40 +
+                            "px";
+                        document.body.appendChild(note);
+                        setTimeout(() => note.remove(), 1500);
+                    }, i * 100);
+                }
+            }
+
+            function parseSong(song) {
+                let title = song,
+                    artist = "";
+                const upper = title.toUpperCase();
+                if (upper.includes(" BY ")) {
+                    const idx = upper.indexOf(" BY ");
+                    artist = title.substring(idx + 4).trim();
+                    title = title.substring(0, idx).trim();
+                }
+                return { title, artist };
+            }
+
+            function renderQueue(data) {
+                const list = document.getElementById("request-list");
+                document.getElementById("request-count").textContent =
+                    data.length;
+
+                if (!data || data.length === 0) {
+                    list.innerHTML = "";
+                    list.appendChild(createEmptyState());
+                    return;
+                }
+
+                const isNew = data.length > previousCount;
+                previousCount = data.length;
+                list.innerHTML = "";
+
+                data.forEach((item, i) => {
+                    const p = parseSong(item.song);
+                    const div = document.createElement("div");
+                    div.className = "request-item";
+                    div.style.animationDelay = i * 0.04 + "s";
+
+                    const newest = i === data.length - 1;
+                    if (newest) {
+                        div.classList.add("newest");
+                        if (isNew) div.classList.add("flash");
+                    }
+
+                    const eq = newest
+                        ? (() => {
+                              const eqBars = document.createElement("div");
+                              eqBars.className = "eq-bars";
+                              for (let j = 0; j < 4; j++) {
+                                  const bar = document.createElement("div");
+                                  bar.className = "eq-bar";
+                                  eqBars.appendChild(bar);
+                              }
+                              return eqBars;
+                          })()
+                        : null;
+
+                    const badge =
+                        newest && isNew
+                            ? (() => {
+                                  const span = document.createElement("span");
+                                  span.className = "new-badge";
+                                  span.textContent = "New";
+                                  return span;
+                              })()
+                            : null;
+
+                    const artistEl = p.artist
+                        ? (() => {
+                              const divA = document.createElement("div");
+                              divA.className = "artist-name";
+                              divA.textContent = "by " + p.artist;
+                              return divA;
+                          })()
+                        : null;
+
+                    const titleText = p.title.toUpperCase();
+                    const needsScroll = titleText.length > 20;
+                    const scrollClass = needsScroll ? " scrolling" : "";
+
+                    const itemNumber = document.createElement("span");
+                    itemNumber.className = "item-number";
+                    itemNumber.textContent = (i + 1).toString();
+
+                    const songRow = document.createElement("div");
+                    songRow.className = "song-row";
+
+                    const songIcon = document.createElement("div");
+                    songIcon.className = "song-icon";
+                    songIcon.textContent = "🎵";
+
+                    const songDetails = document.createElement("div");
+                    songDetails.className = "song-details";
+
+                    const songName = document.createElement("div");
+                    songName.className = "song-name";
+
+                    const songNameInner = document.createElement("span");
+                    songNameInner.className = "song-name-inner" + scrollClass;
+                    songNameInner.textContent = titleText;
+                    if (badge) songNameInner.appendChild(badge);
+
+                    songName.appendChild(songNameInner);
+                    songDetails.appendChild(songName);
+                    if (artistEl) songDetails.appendChild(artistEl);
+
+                    songRow.appendChild(songIcon);
+                    songRow.appendChild(songDetails);
+                    if (eq) songRow.appendChild(eq);
+
+                    const userTag = document.createElement("div");
+                    userTag.className = "user-tag";
+                    userTag.textContent = "👤 " + item.user;
+
+                    div.appendChild(itemNumber);
+                    div.appendChild(songRow);
+                    div.appendChild(userTag);
+
+                    list.appendChild(div);
+                });
+
+                list.scrollTop = list.scrollHeight;
+
+                if (isNew && data.length > 0) {
+                    const last = parseSong(data[data.length - 1].song);
+                    showRequestToast(last.title + " requested");
+                    spawnNotes();
+                }
+            }
+
+            function createEmptyState() {
+                const div = document.createElement("div");
+                div.className = "empty-state";
+                div.innerHTML =
+                    '<div class="vinyl-record"></div>' +
+                    '<div class="empty-text">Waiting for requests</div>' +
+                    '<div class="empty-subtext">Type !req song name and artist</div>';
+                return div;
+            }
+
+            // ═══ SKIP METER ═══
+            let lastSkips = 0;
+            const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 54; // ~339.292
+
+            function spawnSkipFloat() {
+                const circle = document.getElementById("skip-meter-circle");
+                const rect = circle.getBoundingClientRect();
+                const e = document.createElement("div");
+                e.className = "skip-float";
+                e.textContent = "!SKIP";
+                e.style.left =
+                    rect.left +
+                    rect.width / 2 -
+                    20 +
+                    (Math.random() * 20 - 10) +
+                    "px";
+                e.style.top = rect.top + 10 + Math.random() * 10 + "px";
+                document.body.appendChild(e);
+                setTimeout(() => e.remove(), 1500);
+            }
+
+            function spawnSkipBurst() {
+                if (prefersReducedMotion) return;
+                const circle = document.getElementById("skip-meter-circle");
+                const rect = circle.getBoundingClientRect();
+                for (let i = 0; i < 8; i++) {
+                    const p = document.createElement("div");
+                    p.className = "vote-particle";
+                    const angle = ((Math.PI * 2) / 8) * i;
+                    const dist = 20 + Math.random() * 30;
+                    p.style.setProperty("--px", Math.cos(angle) * dist + "px");
+                    p.style.setProperty("--py", Math.sin(angle) * dist + "px");
+                    p.style.left = rect.left + rect.width / 2 + "px";
+                    p.style.top = rect.top + rect.height / 2 + "px";
+                    p.style.position = "fixed";
+                    document.body.appendChild(p);
+                    setTimeout(() => p.remove(), 700);
+                }
+            }
+
+            function triggerSkipRing() {
+                const r = document.getElementById("skip-ring");
+                r.classList.remove("active");
+                void r.offsetWidth;
+                r.classList.add("active");
+            }
+
+            function bumpSkipCount() {
+                const el = document.getElementById("skip-count");
+                el.classList.remove("bump");
+                void el.offsetWidth;
+                el.classList.add("bump");
+            }
+
+            function updateSkipMeter(data) {
+                const skips = data.skips;
+                const threshold = data.threshold;
+                const skippers = data.skippers || [];
+                const pct = Math.min((skips / threshold) * 100, 100);
+
+                const countEl = document.getElementById("skip-count");
+                const barFill = document.getElementById("skip-bar-fill");
+                const ofText = document.getElementById("skip-of-text");
+                const circleFill = document.getElementById("skip-circle-fill");
+                const warning = document.getElementById("skip-warning");
+                const badgeCount = document.getElementById("skip-count-badge");
+                const votingPanel = document.getElementById("voting-panel");
+
+                // Animate on new skip
+                if (skips > lastSkips) {
+                    spawnSkipFloat();
+                    spawnSkipBurst();
+                    triggerSkipRing();
+                    bumpSkipCount();
+                    showSkipToast("Skip! (" + skips + "/" + threshold + ")");
+                }
+                lastSkips = skips;
+
+                // Update display
+                countEl.textContent = skips;
+                badgeCount.textContent = skips;
+                ofText.textContent = "of " + threshold;
+                barFill.style.width = pct + "%";
+
+                // Update circle progress
+                const offset =
+                    CIRCLE_CIRCUMFERENCE - (CIRCLE_CIRCUMFERENCE * pct) / 100;
+                const circleEl = circleFill.querySelector("circle");
+                circleEl.style.strokeDashoffset = offset;
+
+                // Danger states
+                barFill.classList.toggle("danger", pct >= 50 && pct < 100);
+                barFill.classList.toggle("full", pct >= 100);
+                circleFill.classList.toggle("danger", pct >= 50 && pct < 100);
+                circleFill.classList.toggle("full", pct >= 100);
+                warning.classList.toggle("active", pct >= 100);
+                votingPanel.classList.toggle("threshold-flash", pct >= 100);
+                countEl.classList.toggle("glowing", pct >= 50);
+
+                // Render recent skippers
+                const container = document.getElementById("recent-skippers");
+                container.innerHTML = "";
+                skippers.forEach((name, i) => {
+                    const chip = document.createElement("div");
+                    chip.className = "skipper-chip";
+                    chip.style.animationDelay = i * 0.03 + "s";
+
+                    const icon = document.createElement("span");
+                    icon.className = "skipper-icon";
+                    icon.textContent = "⏭️";
+
+                    chip.appendChild(icon);
+                    chip.appendChild(document.createTextNode(name));
+                    container.appendChild(chip);
+                });
+            }
+
+            // ═══ SOCKET ═══
+            var socket = io(window.location.origin, {
+                transports: ["polling", "websocket"],
+                reconnection: true,
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 2000,
+            });
+            socket.on("update_queue", function (data) {
+                renderQueue(data);
+            });
+            socket.on("update_chat", function (data) {
+                if (!data) return;
+                // data: { msg: str, type: 'req'|'skip'|'system' }
+                appendChatMessage(data.msg || "", data.type || "cmd");
+            });
+            socket.on('update_visibility', function(data){
+                if (!data) return;
+                // apply visibility state from server
+                if (window.applyVisibility) window.applyVisibility(data);
+            });
+            socket.on("update_ratings", function (data) {
+                // If the backend indicated the threshold was reached, trigger flash
+                if (data && data.reached) {
+                    const votingPanel = document.getElementById("voting-panel");
+                    votingPanel.classList.add("threshold-flash");
+                    showSkipToast("Skip threshold reached!");
+                    // Let the flash be visible; subsequent payload will be the reset state
+                    setTimeout(() => {
+                        votingPanel.classList.remove("threshold-flash");
+                    }, 1400);
+                }
+                updateSkipMeter(data);
+            });
+
+            // ═══ DEMO MODE ═══
+            setTimeout(() => {
+                if (!socket.connected && !demoStarted && !hadLiveConnection) {
+                    demoStarted = true;
+                    console.log("⚠️ No backend — running demo");
+
+                    // Demo songs
+                    const songs = [
+                        {
+                            user: "RockFan42",
+                            song: "Enter Sandman by Metallica",
+                        },
+                        {
+                            user: "NightOwl",
+                            song: "Bohemian Rhapsody by Queen",
+                        },
+                        {
+                            user: "VibeCheck",
+                            song: "Smells Like Teen Spirit by Nirvana",
+                        },
+                        {
+                            user: "MusicLover",
+                            song: "Sweet Child O Mine by Guns N Roses",
+                        },
+                        {
+                            user: "DarkSoul",
+                            song: "Crawling In My Skin Tonight by Linkin Park",
+                        },
+                        {
+                            user: "ClassicRock",
+                            song: "Stairway to Heaven by Led Zeppelin",
+                        },
+                    ];
+                    let queue = [],
+                        si = 0;
+                    function addSong() {
+                        if (si < songs.length) {
+                            queue.push(songs[si++]);
+                            renderQueue([...queue]);
+                            setTimeout(addSong, 2500 + Math.random() * 2000);
+                        }
+                    }
+                    addSong();
+
+                    // Demo skip votes
+                    let demoSkips = 0;
+                    const demoThreshold = 10;
+                    const skipperNames = [
+                        "RockFan42",
+                        "NightOwl",
+                        "VibeCheck",
+                        "MetalHead",
+                        "ChillVibes",
+                        "DarkSoul",
+                    ];
+                    let demoSkippers = [];
+                    function addSkip() {
+                        if (demoSkips < demoThreshold + 2) {
+                            demoSkips++;
+                            const name =
+                                skipperNames[
+                                    Math.floor(
+                                        Math.random() * skipperNames.length,
+                                    )
+                                ];
+                            demoSkippers.push(name);
+                            if (demoSkippers.length > 5)
+                                demoSkippers = demoSkippers.slice(-5);
+                            updateSkipMeter({
+                                skips: demoSkips,
+                                threshold: demoThreshold,
+                                skippers: [...demoSkippers],
+                            });
+                            setTimeout(addSkip, 1800 + Math.random() * 2500);
+                        }
+                    }
+                    setTimeout(addSkip, 3000);
+                }
+            }, 4000);
+
+            socket.on("connect", function () {
+                hadLiveConnection = true;
+                demoStarted = true;
+                console.log("✅ Socket connected");
+                // hide connection banner on connect
+                const banner = document.querySelector(".conn-banner");
+                if (banner) banner.classList.remove("show");
+            });
+
+            socket.on("disconnect", function (reason) {
+                // show banner and avoid triggering demo mode
+                const banner = document.querySelector(".conn-banner");
+                if (banner) banner.classList.add("show");
+                console.log("⚠️ Socket disconnected:", reason);
+            });
+
+            socket.on("reconnect", function (attempt) {
+                const banner = document.querySelector(".conn-banner");
+                if (banner) banner.classList.remove("show");
+                console.log("🔁 Socket reconnected.");
+            });
+        </script>
+        <!-- Connection banner -->
+        <div class="conn-banner" id="conn-banner">
+            Connection lost - Reconnecting…
+        </div>
+
+        <!-- Moderator bar -->
+        <div class="mod-bar">
+            <div class="mod-toggle" id="mod-toggle">Mods ▾</div>
+            <div class="mod-panel" id="mod-panel">
+                <button class="mod-btn" id="mod-clear">Clear Queue</button>
+                <button class="mod-btn" id="mod-reset">Reset Skip Votes</button>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
+                    <label style="font-size:12px;display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="vis-requests" checked /> Show Requests
+                    </label>
+                    <label style="font-size:12px;display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="vis-chat" checked /> Show Chat
+                    </label>
+                    <label style="font-size:12px;display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="vis-skip" checked /> Show Skip Meter
+                    </label>
+                </div>
+                <div class="mod-feedback" id="mod-feedback"></div>
+            </div>
+        </div>
+
+        <script>
+            // Moderator bar interactions
+            (function () {
+                const toggle = document.getElementById("mod-toggle");
+                const panel = document.getElementById("mod-panel");
+                const clearBtn = document.getElementById("mod-clear");
+                const resetBtn = document.getElementById("mod-reset");
+                const feedback = document.getElementById("mod-feedback");
+                const visRequests = document.getElementById('vis-requests');
+                const visChat = document.getElementById('vis-chat');
+                const visSkip = document.getElementById('vis-skip');
+
+                // Visibility state local cache
+                let visibility = { requests: true, chat: true, voting: true };
+
+                function applyVisibility(state){
+                    const reqPanel = document.querySelector('.requests-panel');
+                    const chatPanel = document.querySelector('.chat-panel');
+                    const votePanel = document.querySelector('.voting-panel');
+                    if(reqPanel) reqPanel.classList.toggle('hidden-panel', !state.requests);
+                    if(chatPanel) chatPanel.classList.toggle('hidden-panel', !state.chat);
+                    if(votePanel) votePanel.classList.toggle('hidden-panel', !state.voting);
+                    // update checkboxes without triggering events
+                    visRequests.checked = !!state.requests;
+                    visChat.checked = !!state.chat;
+                    visSkip.checked = !!state.voting;
+                }
+
+                function sendVisibility(){
+                    try{ socket.emit('set_visibility', visibility); }catch(e){}
+                }
+
+                toggle.addEventListener("click", () => {
+                    panel.classList.toggle("show");
+                });
+
+                function showFeedback(text) {
+                    feedback.textContent = text;
+                    feedback.classList.add("show");
+                    setTimeout(() => feedback.classList.remove("show"), 1800);
+                }
+
+                clearBtn.addEventListener("click", () => {
+                    socket.emit("mod_clear");
+                    showFeedback("Queue cleared");
+                });
+
+                resetBtn.addEventListener("click", () => {
+                    socket.emit("mod_reset");
+                    showFeedback("Skip votes reset");
+                });
+                // visibility toggles
+                visRequests.addEventListener('change', ()=>{
+                    visibility.requests = visRequests.checked;
+                    applyVisibility(visibility);
+                    sendVisibility();
+                });
+                visChat.addEventListener('change', ()=>{
+                    visibility.chat = visChat.checked;
+                    applyVisibility(visibility);
+                    sendVisibility();
+                });
+                visSkip.addEventListener('change', ()=>{
+                    visibility.voting = visSkip.checked;
+                    applyVisibility(visibility);
+                    sendVisibility();
+                });
+
+                // expose applyVisibility and set initial
+                window.applyVisibility = applyVisibility;
+                applyVisibility(visibility);
+            })();
+        </script>
+    </body>
+</html>

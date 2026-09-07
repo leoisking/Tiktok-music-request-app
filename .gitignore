@@ -1,0 +1,15 @@
+# Project place file
+/flask-tiktok-socket-setup.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+sourcemap.json
+
+# Local configuration and runtime output
+spotify_env.bat
+__pycache__/
+*.py[cod]
+logs/
+last_tunnel_urls.txt
