@@ -2783,12 +2783,36 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
         if req_match:
             requested_song = req_match.group(1).strip()
             if requested_song:
+                # Catch variations of instructional placeholders used to teach the chat
+                placeholder_pattern = r"^(song\s*name\s*(by|and|-)\s*artist|artist\s*name\s*-\s*song\s*name|song\s*title\s*by\s*artist)$"
+                if re.match(placeholder_pattern, requested_song, flags=re.IGNORECASE):
+                    print(f"   Ignored instructional helper command from {safe_name}")
+                    return {'action': 'ignored', 'reason': 'instructional_placeholder'}
+
+            if requested_song:
                 now_ts = time.time()
-                requester_key = _request_user_key(nickname, unique_id)
+                requester_key = _request_user_key(nickname, unique_id) or normalize_message(nickname).lower() or 'guest'
                 song_norm = normalize_message(requested_song).lower()
 
                 with state_lock:
                     _prune_request_rate_caches_unlocked(now_ts)
+                    existing_for_requester = any(
+                        normalize_message(item.get('song', '')).lower() == song_norm
+                        and str(item.get('request_key') or item.get('user', '')).lower() == requester_key.lower()
+                        for item in song_queue
+                    )
+                    if existing_for_requester:
+                        print(f"   Ignored duplicate request from {safe_name}: '{requested_song}' is already queued for this viewer.")
+                        return {
+                            'action': 'duplicate_request_recent',
+                            'song': requested_song,
+                            'request_feedback': {
+                                'status': 'rejected',
+                                'reason': 'duplicate_recent',
+                                'user': nickname,
+                                'song': requested_song
+                            }
+                        }
                     if requester_key:
                         if REQUEST_COOLDOWN_SEC > 0:
                             last_ts = float(request_last_by_user.get(requester_key, 0.0) or 0.0)
@@ -2824,7 +2848,7 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
                             request_last_song_by_user[f"{requester_key}|{song_norm}"] = now_ts
 
                 spotify_result = queue_spotify_track_from_request(requested_song, requester=nickname)
-                queue_entry = {'user': nickname, 'song': requested_song, 'ts': time.time()}
+                queue_entry = {'user': nickname, 'song': requested_song, 'ts': time.time(), 'request_key': requester_key}
                 if spotify_result.get('ok'):
                     try:
                         track_duration_ms = int(spotify_result.get('track_duration_ms', 0) or 0)
