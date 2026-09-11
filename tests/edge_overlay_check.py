@@ -369,8 +369,8 @@ def check_queue_widget(edge, url, checker, shots):
                   "request queue renders when Spotify is not configured")
     page.evaluate("spotifyQueueStatus = {auth_ready: true, last_error: 'test error'}; spotifyQueueItems = [];"
                   "syncQueueSourceAndRender(); true")
-    checker.check("No queued songs" in page.evaluate("document.getElementById('queue-list').textContent"),
-                  "empty Spotify queue shows the empty state")
+    checker.check("First Request" in page.evaluate("document.getElementById('queue-list').textContent"),
+                  "local request remains visible while Spotify queue is empty")
     checker.check("sync unavailable" in page.evaluate("document.getElementById('queue-status').textContent"),
                   "sync error is reported in #queue-status")
     checker.check(page.evaluate("document.getElementById('queue-status').getAttribute('data-level')") == "warn",

@@ -200,7 +200,7 @@ async function main() {
             spotifyQueueItems = [];
             syncQueueSourceAndRender();
         });
-        assert.match(await queue.locator('#queue-list').textContent(), /No queued songs/);
+        assert.match(await queue.locator('#queue-list').textContent(), /First Request/);
         assert.match(await queue.locator('#queue-status').textContent(), /sync unavailable/);
         const elapsed = await queue.evaluate(() => {
             handleNow({ available: true, title: 'Test Song', artist: 'Artist', elapsed: 30, duration: 200, playing: false });

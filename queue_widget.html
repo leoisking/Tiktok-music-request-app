@@ -804,7 +804,8 @@
                 queueItems = Array.isArray(spotifyQueueItems) ? spotifyQueueItems : [];
             } else if (AUTO_SOURCE_MODE) {
                 const spotifyReady = !!(spotifyQueueStatus && spotifyQueueStatus.auth_ready);
-                usingSpotifyQueue = spotifyReady;
+                // Keep accepted viewer requests visible while Spotify syncs an empty queue.
+                usingSpotifyQueue = spotifyReady && spotifyQueueItems.length > 0;
                 queueItems = usingSpotifyQueue
                     ? spotifyQueueItems
                     : (Array.isArray(requestQueueItems) ? requestQueueItems : []);
@@ -831,7 +832,7 @@
                 if (!overlayConnected) {
                     status.textContent = 'Connection lost. Showing the last known queue.';
                     level = 'warn';
-                } else if ((FORCE_SPOTIFY_SOURCE || usingSpotifyQueue) && spotifyQueueStatus.last_error) {
+                } else if ((FORCE_SPOTIFY_SOURCE || AUTO_SOURCE_MODE || usingSpotifyQueue) && spotifyQueueStatus.last_error) {
                     status.textContent = 'Spotify sync unavailable. Showing the last known queue.';
                     level = 'warn';
                 } else if (FORCE_SPOTIFY_SOURCE && !spotifyQueueStatus.auth_ready) {
