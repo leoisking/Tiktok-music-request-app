@@ -1,7 +1,49 @@
 import http.client
+import ssl
 import unittest
+import urllib.error
+from unittest.mock import patch
 
+import spotify_oauth_helper as helper
 from spotify_oauth_helper import CallbackServer
+
+
+class TlsContextTests(unittest.TestCase):
+    def test_module_does_not_disable_global_certificate_verification(self):
+        self.assertIsNot(ssl._create_default_https_context, ssl._create_unverified_context)
+
+    def test_verifying_context_keeps_verification_but_tolerates_inspection_cas(self):
+        context = helper.verifying_ssl_context()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertFalse(context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_token_exchange_uses_the_verifying_context(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *arguments):
+                return False
+
+            def read(self):
+                return b'{"refresh_token": "token"}'
+
+        with patch.object(helper.urllib.request, 'urlopen', return_value=Response()) as urlopen:
+            payload = helper._exchange_code_for_tokens('id', 'secret', 'code', 'http://127.0.0.1:8888/callback')
+        self.assertEqual(payload['refresh_token'], 'token')
+        context = urlopen.call_args.kwargs['context']
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertFalse(context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_certificate_failures_explain_network_inspection(self):
+        error = urllib.error.URLError(ssl.SSLCertVerificationError('certificate verify failed: self-signed certificate'))
+        with patch.object(helper.urllib.request, 'urlopen', side_effect=error):
+            with self.assertRaises(RuntimeError) as raised:
+                helper._exchange_code_for_tokens('id', 'secret', 'code', 'http://127.0.0.1:8888/callback')
+        message = str(raised.exception)
+        self.assertIn('intercepting', message)
+        self.assertIn('SSL_CERT_FILE', message)
 
 
 class OAuthCallbackTests(unittest.TestCase):

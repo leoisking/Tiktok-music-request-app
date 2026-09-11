@@ -52,6 +52,7 @@ Public HTTPS is off by default. Enabling it makes the widget internet-accessible
 - Chat not arriving: verify the username and that the account is live. Read server.log for connection details; a running web server does not mean live chat is connected.
 - HTTPS not ready: wait briefly, then check cloudflared.log. A link can be assigned before Cloudflare finishes connecting. Stop and Start to retry. Local OBS links work without Cloudflare.
 - Startup failure: check launcher.log and server.log in the settings folder.
+- Spotify sign-in or requests fail with `CERTIFICATE_VERIFY_FAILED`: a firewall or security product on that network is intercepting HTTPS, which is common on work and school connections. Use your home network, or set the `SSL_CERT_FILE` environment variable to a certificate bundle that includes the product's root certificate. Never disable certificate verification.
 - Reset: close the app, rename settings.json, then reopen and configure it again.
 - This build is unsigned. Windows may warn about an unrecognized publisher. Only run a copy from a trusted source; do not disable antivirus protections.
 
