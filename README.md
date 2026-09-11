@@ -12,7 +12,12 @@ Live Widget is a real-time song-request and skip-voting overlay for TikTok Live 
 <img width="1123" height="855" alt="Desktop UI Preview" src="https://github.com/user-attachments/assets/d19a5db3-ee7d-4a4c-bc5e-b3cea1d1038e" />
 
 ### Queue Overlay Widget
-<img width="926" height="891" alt="Queue Overlay Preview" src="https://github.com/user-attachments/assets/818447eb-30a0-4632-af22-a4df4108ddec" />
+<img width="957" height="895" alt="image" src="https://github.com/user-attachments/assets/fd513c1d-c113-4272-a334-2790778ccbbf" />
+
+
+### Control Panel
+<img width="1896" height="913" alt="image" src="https://github.com/user-attachments/assets/81af5f7d-b394-4ef9-bfea-eec871f8b942" />
+
 
 ---
 
