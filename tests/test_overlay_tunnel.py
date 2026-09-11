@@ -141,12 +141,14 @@ class OverlayTunnelTests(unittest.TestCase):
         process.kill.assert_called_once()
         self.assertEqual(process.wait.call_count, 2)
 
-    def test_both_batch_launchers_use_the_shared_helper(self):
+    def test_tunnel_launcher_uses_the_shared_helper(self):
+        # start_dual_overlay.bat is the local-only launcher and intentionally starts no tunnel.
         root = Path(__file__).resolve().parents[1]
-        for filename in ('start_dual_overlay.bat', 'start_with_tunnel.bat'):
-            source = (root / filename).read_text(encoding='utf-8')
-            self.assertIn('python "%~dp0_launch_overlay_tunnel.py" --port "%PORT%"', source)
-            self.assertLess(source.index(':server_ready'), source.index('python "%~dp0_launch_overlay_tunnel.py"'))
+        source = (root / 'start_with_tunnel.bat').read_text(encoding='utf-8')
+        self.assertIn('python "%~dp0_launch_overlay_tunnel.py" --port "%PORT%"', source)
+        self.assertLess(source.index(':server_ready'), source.index('python "%~dp0_launch_overlay_tunnel.py"'))
+        local_source = (root / 'start_dual_overlay.bat').read_text(encoding='utf-8')
+        self.assertNotIn('_launch_overlay_tunnel.py', local_source)
 
 
 if __name__ == '__main__':

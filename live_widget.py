@@ -13,11 +13,13 @@ import math
 import hashlib
 import secrets
 import ssl
+import itertools
+import functools
+import http.client
 from collections import Counter, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 import urllib.parse
-import urllib.request
-import urllib.error
 from flask import Flask, send_file, request
 from flask_socketio import SocketIO
 from TikTokLive import TikTokLiveClient
@@ -28,7 +30,8 @@ except Exception:
     RoomUserSeqEvent = None
 
 try:
-    from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as MediaSessionManager
+    # Changed from winsdk to winrt
+    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as MediaSessionManager
     HAS_WINSDK_MEDIA = True
 except Exception:
     MediaSessionManager = None
@@ -104,6 +107,11 @@ AUTO_NEXT_ON_THRESHOLD = os.getenv("AUTO_NEXT_ON_THRESHOLD", "1").strip().lower(
 SPOTIFY_TRACK_WATCHER_ENABLED = os.getenv("SPOTIFY_TRACK_WATCHER_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 SPOTIFY_TRACK_POLL_SEC = _env_float("SPOTIFY_TRACK_POLL_SEC", 2.0, minimum=0.5)
 SPOTIFY_QUEUE_POLL_SEC = _env_float("SPOTIFY_QUEUE_POLL_SEC", 1.5, minimum=0.75)
+SPOTIFY_OPTIMISTIC_QUEUE_TTL_SEC = _env_float("SPOTIFY_OPTIMISTIC_QUEUE_TTL_SEC", 8.0, minimum=1.0)
+SPOTIFY_HTTP_TIMEOUT_SEC = _env_float("SPOTIFY_HTTP_TIMEOUT_SEC", 12.0, minimum=1.0)
+SPOTIFY_DEVICE_CACHE_TTL_SEC = _env_float("SPOTIFY_DEVICE_CACHE_TTL_SEC", 300.0, minimum=5.0)
+SPOTIFY_ALBUM_ART_MISS_TTL_SEC = _env_float("SPOTIFY_ALBUM_ART_MISS_TTL_SEC", 60.0, minimum=5.0)
+SPOTIFY_SEARCH_PARALLELISM = _env_int("SPOTIFY_SEARCH_PARALLELISM", 4, minimum=1)
 SPOTIFY_NOW_PLAYING_MISS_THRESHOLD = _env_int("SPOTIFY_NOW_PLAYING_MISS_THRESHOLD", 3, minimum=1)
 SPOTIFY_QUEUE_ON_REQUEST = os.getenv("SPOTIFY_QUEUE_ON_REQUEST", "1").strip().lower() not in ("0", "false", "no", "off")
 SPOTIFY_QUEUE_MANUAL_ONLY = os.getenv("SPOTIFY_QUEUE_MANUAL_ONLY", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -196,6 +204,26 @@ manual_skip_threshold_override = None
 live_viewer_count = 0
 live_viewer_count_ts = 0.0
 live_viewer_source = ""
+# Tracks queued on Spotify by this app that the Spotify queue API has not confirmed yet.
+spotify_optimistic_queue_items = []
+# Set to wake the Spotify queue poller immediately instead of waiting for the poll interval.
+spotify_queue_poll_wakeup = threading.Event()
+# Single worker so Spotify queue order matches request order.
+spotify_request_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="spotify-request")
+# Single worker keeps chat commands ordered while keeping them off the chat client's event loop.
+chat_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chat-pipeline")
+# Persistent pool so parallel search threads keep their HTTPS connections warm between requests.
+spotify_search_executor = ThreadPoolExecutor(max_workers=SPOTIFY_SEARCH_PARALLELISM, thread_name_prefix="spotify-search")
+# Single writer so state-file writes stay ordered and never block callers holding state_lock.
+state_write_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="state-writer")
+_request_id_counter = itertools.count(1)
+# Per-thread keep-alive HTTPS connections to Spotify hosts (http.client is not thread-safe).
+_spotify_http_local = threading.local()
+spotify_device_lock = threading.Lock()
+spotify_device_cache = {"id": "", "ts": 0.0}
+album_art_cache = OrderedDict()
+album_art_cache_lock = threading.Lock()
+ALBUM_ART_CACHE_MAX = 512
 request_last_by_user = {}
 request_last_song_by_user = {}
 last_request_cache_prune_time = 0.0
@@ -347,6 +375,168 @@ def broadcast_request_feedback(payload):
             socketio.emit('request_feedback', payload)
     except:
         pass
+
+
+def request_spotify_queue_refresh():
+    """Wake the Spotify queue poller so the overlay reconciles without waiting a full interval."""
+    spotify_queue_poll_wakeup.set()
+
+
+def wait_for_spotify_requests(timeout=None):
+    """Block until every pending background Spotify resolution has finished.
+
+    The resolver is a single FIFO worker, so once a no-op submitted now completes,
+    everything submitted before it has completed too.
+    """
+    try:
+        spotify_request_executor.submit(lambda: None).result(timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def _spotify_queue_item_from_result(spotify_result, requester):
+    """Shape a successful queue-add result like an item from the Spotify queue API."""
+    name = _safe_track_text(spotify_result.get("track_name", ""))
+    artists = _safe_track_text(spotify_result.get("track_artists", ""))
+    try:
+        duration_ms = int(spotify_result.get("track_duration_ms", 0) or 0)
+    except Exception:
+        duration_ms = 0
+    return {
+        "song": name or "Unknown Song",
+        "spotify_track": name,
+        "spotify_artist": artists,
+        "spotify_uri": str(spotify_result.get("track_uri", "") or "").strip(),
+        "spotify_linked_uri": "",
+        "spotify_key": _track_key(name, artists),
+        "duration_sec": max(0, int(round(duration_ms / 1000.0))),
+        "album_art": str(spotify_result.get("album_art", "") or "").strip(),
+        "source": "spotify_queue",
+        "user": _safe_track_text(requester),
+    }
+
+
+def _spotify_item_tokens(item):
+    tokens = set()
+    if not isinstance(item, dict):
+        return tokens
+    for field in ("spotify_uri", "spotify_linked_uri"):
+        value = str(item.get(field, "") or "").strip()
+        if value:
+            tokens.add("u:" + value)
+    key = str(item.get("spotify_key", "") or "").strip() or _track_key(
+        item.get("spotify_track", ""), item.get("spotify_artist", "")
+    )
+    if key:
+        tokens.add("k:" + key)
+    return tokens
+
+
+def _merge_optimistic_spotify_items_unlocked(items, now_ts=None):
+    """Keep just-queued tracks visible until the Spotify queue confirms them or they expire.
+
+    Caller must hold state_lock. Confirmed and expired entries are dropped from the pending list.
+    """
+    if now_ts is None:
+        now_ts = time.time()
+    if not spotify_optimistic_queue_items:
+        return items
+    present = set()
+    for fetched in items:
+        present.update(_spotify_item_tokens(fetched))
+    merged = list(items)
+    still_pending = []
+    for pending in spotify_optimistic_queue_items:
+        item = pending.get("item") if isinstance(pending, dict) else None
+        if not isinstance(item, dict):
+            continue
+        if _spotify_item_tokens(item) & present:
+            continue
+        try:
+            age = now_ts - float(pending.get("ts", 0) or 0)
+        except Exception:
+            age = SPOTIFY_OPTIMISTIC_QUEUE_TTL_SEC + 1
+        if age > SPOTIFY_OPTIMISTIC_QUEUE_TTL_SEC:
+            continue
+        still_pending.append(pending)
+        merged.append(item)
+    spotify_optimistic_queue_items[:] = still_pending
+    return merged
+
+
+def _apply_spotify_request_result(request_id, requested_song, requester, spotify_result):
+    """Enrich the local queue entry and the Spotify mirror once a background lookup finishes."""
+    safe_name = safe_print_name(requester or 'Guest')
+    if not isinstance(spotify_result, dict):
+        spotify_result = {"ok": False, "reason": "invalid_result"}
+    if not spotify_result.get("ok"):
+        try:
+            print(f"   Request stays local only: {requested_song} (by {safe_name})")
+            print(f"   Spotify queue add skipped/failed: {spotify_result.get('reason', 'unknown_error')}")
+        except Exception:
+            pass
+        return
+
+    mirrored = _spotify_queue_item_from_result(spotify_result, requester)
+    with state_lock:
+        for item in song_queue:
+            if isinstance(item, dict) and item.get('request_id') == request_id:
+                if mirrored["duration_sec"] > 0:
+                    item['duration_sec'] = mirrored["duration_sec"]
+                item['spotify_track'] = mirrored['spotify_track']
+                item['spotify_artist'] = mirrored['spotify_artist']
+                item['album_art'] = mirrored['album_art']
+                break
+        spotify_optimistic_queue_items.append({"ts": time.time(), "item": mirrored})
+        spotify_queue_state.append(mirrored)
+        spotify_queue_status["count"] = len(spotify_queue_state)
+    broadcast_queue()
+    broadcast_spotify_queue()
+    broadcast_spotify_queue_status()
+    broadcast_request_feedback({
+        'status': 'accepted',
+        'reason': 'queued',
+        'user': requester,
+        'song': requested_song,
+        'spotify_queued': True
+    })
+    request_spotify_queue_refresh()
+    try:
+        print(
+            f"   Request queued on Spotify: "
+            f"{mirrored['spotify_track'] or requested_song} - {mirrored['spotify_artist']} (by {safe_name})"
+        )
+        if spotify_result.get('device_id_used'):
+            print(f"   Spotify device used: {spotify_result.get('device_id_used')}")
+    except Exception:
+        pass
+
+
+def _dispatch_spotify_request(request_id, requested_song, requester):
+    """Resolve and queue a request on Spotify in the background so chat never waits on the API."""
+    def _job():
+        try:
+            result = queue_spotify_track_from_request(requested_song, requester=requester)
+        except Exception as e:
+            result = {"ok": False, "reason": str(e)}
+        try:
+            _apply_spotify_request_result(request_id, requested_song, requester, result)
+        except Exception as e:
+            try:
+                print(f"[SPOTIFY] Failed to apply queue result: {e}")
+            except Exception:
+                pass
+    spotify_request_executor.submit(_job)
+
+
+async def _run_chat_pipeline(source, nickname, unique_id, msg, is_moderator=False):
+    """Run the chat pipeline on a worker thread so the chat client's event loop never blocks."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        chat_executor,
+        functools.partial(process_chat_message, source, nickname, unique_id, msg, is_moderator=is_moderator),
+    )
 
 
 def prune_song_queue_unlocked(now_ts=None):
@@ -682,21 +872,17 @@ def _spotify_refresh_access_token():
         "grant_type": "refresh_token",
         "refresh_token": SPOTIFY_REFRESH_TOKEN
     }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://accounts.spotify.com/api/token",
-        data=body,
-        method="POST",
+    status, raw = _spotify_http_request(
+        "accounts.spotify.com", "POST", "/api/token", body=body,
         headers={
             "Authorization": _spotify_basic_auth_header(),
             "Content-Type": "application/x-www-form-urlencoded",
         }
     )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Spotify token refresh failed ({e.code}): {err}")
+    text = raw.decode("utf-8", errors="ignore")
+    if status >= 400:
+        raise RuntimeError(f"Spotify token refresh failed ({status}): {text}")
+    payload = json.loads(text) if text else {}
 
     token = payload.get("access_token")
     if not token:
@@ -714,39 +900,116 @@ def _spotify_get_access_token():
         return _spotify_refresh_access_token()
 
 
+def _spotify_http_connection(host):
+    conns = getattr(_spotify_http_local, "conns", None)
+    if conns is None:
+        conns = {}
+        _spotify_http_local.conns = conns
+    conn = conns.get(host)
+    if conn is None:
+        conn = http.client.HTTPSConnection(host, timeout=SPOTIFY_HTTP_TIMEOUT_SEC)
+        conns[host] = conn
+    return conn
+
+
+def _spotify_http_drop_connection(host):
+    conns = getattr(_spotify_http_local, "conns", None)
+    if not conns:
+        return
+    conn = conns.pop(host, None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _reset_spotify_http_pool():
+    """Close this thread's cached Spotify connections."""
+    conns = getattr(_spotify_http_local, "conns", None) or {}
+    for host in list(conns):
+        _spotify_http_drop_connection(host)
+
+
+def _spotify_http_request(host, method, path, body=None, headers=None):
+    """Send one HTTPS request over this thread's keep-alive connection.
+
+    Returns (status, raw_bytes). A connection that died while idle is replaced and the
+    request retried once, but only when the request was never sent or is a GET, so a
+    queue POST can never be duplicated. Timeouts are not retried.
+    """
+    last_error = None
+    for attempt in range(2):
+        conn = _spotify_http_connection(host)
+        sent = False
+        try:
+            conn.request(method, path, body=body, headers=headers or {})
+            sent = True
+            resp = conn.getresponse()
+            raw = resp.read()
+            if getattr(resp, "will_close", False):
+                _spotify_http_drop_connection(host)
+            return resp.status, raw
+        except (http.client.HTTPException, OSError) as e:
+            last_error = e
+            _spotify_http_drop_connection(host)
+            retry_safe = (not sent) or method.upper() == "GET"
+            if attempt == 0 and retry_safe and not isinstance(e, TimeoutError):
+                continue
+            break
+    raise RuntimeError(f"Spotify HTTPS request failed for {host}{path}: {last_error}")
+
+
 def _spotify_api_request(method, path, query=None, retry_on_401=True, want_json=True):
     token = _spotify_get_access_token()
-    url = f"https://api.spotify.com/v1{path}"
+    method_upper = method.upper()
+    url_path = f"/v1{path}"
     if query:
-        url += "?" + urllib.parse.urlencode(query)
-    req = urllib.request.Request(
-        url,
-        data=b"" if method.upper() == "POST" else None,
-        method=method.upper(),
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            status = resp.getcode()
-            raw = resp.read()
-            if want_json:
-                return status, (json.loads(raw.decode("utf-8")) if raw else {})
-            return status, None
-    except urllib.error.HTTPError as e:
-        if e.code == 401 and retry_on_401:
+        url_path += "?" + urllib.parse.urlencode(query)
+    headers = {"Authorization": f"Bearer {token}"}
+    body = None
+    if method_upper == "POST":
+        body = b""
+        headers["Content-Length"] = "0"
+    status, raw = _spotify_http_request("api.spotify.com", method_upper, url_path, body=body, headers=headers)
+    if status >= 400:
+        if status == 401 and retry_on_401:
             with spotify_token_lock:
                 _spotify_refresh_access_token()
             return _spotify_api_request(method, path, query=query, retry_on_401=False, want_json=want_json)
-        err = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Spotify API error ({e.code}) on {path}: {err}")
+        err = raw.decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Spotify API error ({status}) on {path}: {err}")
+    if want_json:
+        return status, (json.loads(raw.decode("utf-8")) if raw else {})
+    return status, None
+
+
+def _invalidate_spotify_device_cache():
+    with spotify_device_lock:
+        spotify_device_cache.update({"id": "", "ts": 0.0})
 
 
 def _spotify_resolve_device_id():
-    """Resolve a playable device id for queue operations."""
+    """Resolve a playable device id for queue operations, caching the answer between requests."""
     # If user explicitly configured one, prefer it.
     if SPOTIFY_DEVICE_ID:
         return SPOTIFY_DEVICE_ID
 
+    now_ts = time.time()
+    with spotify_device_lock:
+        cached_id = spotify_device_cache.get("id", "")
+        cached_ts = float(spotify_device_cache.get("ts", 0.0) or 0.0)
+    if cached_id and (now_ts - cached_ts) < SPOTIFY_DEVICE_CACHE_TTL_SEC:
+        return cached_id
+
+    device_id = _spotify_fetch_device_id()
+    if device_id:
+        with spotify_device_lock:
+            spotify_device_cache.update({"id": device_id, "ts": now_ts})
+    return device_id
+
+
+def _spotify_fetch_device_id():
     status, payload = _spotify_api_request("GET", "/me/player/devices", want_json=True)
     if status != 200 or not isinstance(payload, dict):
         return ""
@@ -841,6 +1104,31 @@ def _spotify_search_queries(requested_song):
     return out, song_part, artist_part
 
 
+def _spotify_confident_score_floor(artist_hint):
+    """Score at which a candidate is an exact title (and artist, when given) match."""
+    if _spotify_text_key(_spotify_strip_noise(artist_hint or "")):
+        return 180
+    return 100
+
+
+def _spotify_search_tracks(q):
+    query_obj = {"q": q, "type": "track", "limit": SPOTIFY_SEARCH_CANDIDATE_LIMIT}
+    if SPOTIFY_SEARCH_MARKET:
+        query_obj["market"] = SPOTIFY_SEARCH_MARKET
+    status, payload = _spotify_api_request("GET", "/search", query=query_obj, want_json=True)
+    if status != 200:
+        return []
+    return (((payload or {}).get("tracks") or {}).get("items") or [])
+
+
+def _spotify_search_tracks_safe(q):
+    """Search wrapper for worker threads: returns (tracks, error_text) and never raises."""
+    try:
+        return _spotify_search_tracks(q), ""
+    except Exception as e:
+        return [], str(e)
+
+
 def _spotify_track_match_score(track_obj, wanted_song, wanted_artist):
     if not isinstance(track_obj, dict):
         return -9999
@@ -892,32 +1180,31 @@ def queue_spotify_track_from_request(requested_song, requester=""):
 
     try:
         queries, song_part, artist_part = _spotify_search_queries(requested_song)
+        queries = queries[:6]
         best_track = None
         best_score = -9999
         first_search_error = ""
+        confident_floor = _spotify_confident_score_floor(artist_part)
 
-        for q in queries[:6]:
-            try:
-                query_obj = {"q": q, "type": "track", "limit": SPOTIFY_SEARCH_CANDIDATE_LIMIT}
-                if SPOTIFY_SEARCH_MARKET:
-                    query_obj["market"] = SPOTIFY_SEARCH_MARKET
-                status, payload = _spotify_api_request(
-                    "GET",
-                    "/search",
-                    query=query_obj,
-                    want_json=True
-                )
-                if status != 200:
-                    continue
-                tracks = (((payload or {}).get("tracks") or {}).get("items") or [])
-                for candidate in tracks:
-                    score = _spotify_track_match_score(candidate, song_part, artist_part)
-                    if score > best_score:
-                        best_score = score
-                        best_track = candidate
-            except Exception as e:
-                if not first_search_error:
-                    first_search_error = str(e)
+        def consider(tracks):
+            nonlocal best_track, best_score
+            for candidate in tracks:
+                score = _spotify_track_match_score(candidate, song_part, artist_part)
+                if score > best_score:
+                    best_score = score
+                    best_track = candidate
+
+        # The most specific query usually wins outright; stop there when it does.
+        if queries:
+            tracks, err = _spotify_search_tracks_safe(queries[0])
+            consider(tracks)
+            first_search_error = err
+        remaining = queries[1:]
+        if remaining and best_score < confident_floor:
+            for tracks, err in spotify_search_executor.map(_spotify_search_tracks_safe, remaining):
+                consider(tracks)
+                if err and not first_search_error:
+                    first_search_error = err
 
         if not best_track:
             if first_search_error:
@@ -967,6 +1254,9 @@ def queue_spotify_track_from_request(requested_song, requester=""):
                 last_err = f"queue_status_{queue_status}"
             except Exception as e:
                 last_err = str(e)
+            if qobj.get("device_id"):
+                # The remembered device is gone or unusable; look it up fresh next time.
+                _invalidate_spotify_device_cache()
 
         if not queued_ok:
             return {"ok": False, "reason": last_err or "queue_add_failed"}
@@ -996,12 +1286,17 @@ def _normalize_manual_queue_entry(entry):
             key = _track_key(title, artist)
         if not (uri or key):
             return None
+        try:
+            registered_ts = float(entry.get("ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            registered_ts = 0.0
         return {
             "uri": uri,
             "key": key,
             "title": title,
             "artist": artist,
-            "requester": requester
+            "requester": requester,
+            "ts": registered_ts
         }
 
     uri = str(entry or "").strip()
@@ -1012,7 +1307,8 @@ def _normalize_manual_queue_entry(entry):
         "key": "",
         "title": "",
         "artist": "",
-        "requester": ""
+        "requester": "",
+        "ts": 0.0
     }
 
 
@@ -1148,7 +1444,8 @@ def _register_manual_spotify_queue_uri(track_uri, track_name="", track_artists="
         "uri": track_uri,
         "title": track_name,
         "artist": track_artists,
-        "requester": requester
+        "requester": requester,
+        "ts": time.time()
     })
     if not entry:
         return
@@ -1314,6 +1611,20 @@ def _filter_spotify_queue_to_manual_unlocked(items):
                     if e.get("key", ""):
                         seen_keys.add("k:" + e.get("key", ""))
 
+    # Keep entries we queued moments ago: Spotify's queue API can lag behind a successful add,
+    # and dropping them here would lose the requester once the track does appear.
+    now_ts = time.time()
+    for idx, entry in enumerate(entries):
+        if used[idx]:
+            continue
+        try:
+            registered_ts = float(entry.get("ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            registered_ts = 0.0
+        if registered_ts and (now_ts - registered_ts) <= SPOTIFY_OPTIMISTIC_QUEUE_TTL_SEC:
+            used[idx] = True
+            filtered_entries.append(entry)
+
     # Reconcile expected list to what still exists in Spotify queue.
     spotify_manual_queue_uris[:] = filtered_entries[-SPOTIFY_MANUAL_QUEUE_TRACK_CAP:]
     if spotify_manual_queue_bootstrap_active and len(spotify_manual_queue_uris) > SPOTIFY_MANUAL_QUEUE_BOOTSTRAP_LIMIT:
@@ -1333,8 +1644,42 @@ def _manual_queue_state_path():
     return os.path.join(base_dir, raw)
 
 
+def _write_manual_queue_state_file(path, payload):
+    """Atomically write the manual queue state file. Runs on the state-writer thread."""
+    global spotify_manual_queue_last_saved
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=True)
+        os.replace(tmp, path)
+    except Exception as e:
+        # Forget the last signature so the next state change retries the write.
+        with state_lock:
+            spotify_manual_queue_last_saved = ""
+        try:
+            print(f"[SPOTIFY] Failed to save manual queue state: {e}")
+        except Exception:
+            pass
+
+
+def wait_for_background_writes(timeout=None):
+    """Block until every queued state-file write has finished (single FIFO writer)."""
+    try:
+        state_write_executor.submit(lambda: None).result(timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
 def _save_manual_spotify_queue_state_unlocked(force=False):
-    """Persist tracked manual Spotify queue entries. Caller must hold state_lock."""
+    """Queue a persist of tracked manual Spotify queue entries. Caller must hold state_lock.
+
+    The snapshot is taken here; the disk write happens on a background thread so the
+    lock is never held across file I/O.
+    """
     global spotify_manual_queue_last_saved
     cleaned = _normalize_manual_queue_entries_unlocked()
     mode = "bootstrap" if spotify_manual_queue_bootstrap_active else "tracked"
@@ -1345,26 +1690,13 @@ def _save_manual_spotify_queue_state_unlocked(force=False):
         return
 
     payload = {
-        "entries": cleaned,
+        "entries": copy.deepcopy(cleaned),
         "uris": [e.get("uri", "") for e in cleaned if e.get("uri", "")],  # backward compatibility
         "mode": mode,
         "updated_at": int(time.time())
     }
-    path = _manual_queue_state_path()
-    try:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=True)
-        os.replace(tmp, path)
-        spotify_manual_queue_last_saved = sig
-    except Exception as e:
-        try:
-            print(f"[SPOTIFY] Failed to save manual queue state: {e}")
-        except Exception:
-            pass
+    spotify_manual_queue_last_saved = sig
+    state_write_executor.submit(_write_manual_queue_state_file, _manual_queue_state_path(), payload)
 
 
 def _load_manual_spotify_queue_state():
@@ -1518,11 +1850,27 @@ def fetch_spotify_now_playing_state():
         return None, str(e)
 
 
+def _reset_album_art_cache():
+    with album_art_cache_lock:
+        album_art_cache.clear()
+
+
 def _spotify_find_album_art_for_track(title, artist):
+    """Look up album art via search, remembering hits indefinitely and misses briefly."""
     t = _safe_track_text(title)
     a = _safe_track_text(artist)
     if not t and not a:
         return ""
+    cache_key = _track_key(t, a) or f"{t}|{a}".lower()
+    now_ts = time.time()
+    with album_art_cache_lock:
+        cached = album_art_cache.get(cache_key)
+        if cached is not None:
+            url, cached_ts = cached
+            if url or (now_ts - cached_ts) < SPOTIFY_ALBUM_ART_MISS_TTL_SEC:
+                album_art_cache.move_to_end(cache_key)
+                return url
+
     q = f'track:"{t}" artist:"{a}"' if (t and a) else (t or a)
     try:
         status, payload = _spotify_api_request(
@@ -1531,94 +1879,125 @@ def _spotify_find_album_art_for_track(title, artist):
             query={"q": q, "type": "track", "limit": 1},
             want_json=True
         )
-        if status != 200 or not isinstance(payload, dict):
-            return ""
-        items = (((payload or {}).get("tracks") or {}).get("items") or [])
-        if not items:
-            return ""
-        first = items[0] if isinstance(items[0], dict) else {}
-        return _extract_album_art_url(first)
+        url = ""
+        if status == 200 and isinstance(payload, dict):
+            items = (((payload or {}).get("tracks") or {}).get("items") or [])
+            if items:
+                first = items[0] if isinstance(items[0], dict) else {}
+                url = _extract_album_art_url(first)
     except Exception:
+        # Network trouble is not a real miss; leave it uncached so the next poll retries.
         return ""
+
+    with album_art_cache_lock:
+        album_art_cache[cache_key] = (url, now_ts)
+        album_art_cache.move_to_end(cache_key)
+        while len(album_art_cache) > ALBUM_ART_CACHE_MAX:
+            album_art_cache.popitem(last=False)
+    return url
+
+
+def _spotify_queue_status_fields():
+    """Status fields that are the same in every poller update. Caller must hold state_lock."""
+    return {
+        "updated_at": int(time.time()),
+        "manual_only": SPOTIFY_QUEUE_MANUAL_ONLY,
+        "manual_pending": len(spotify_manual_queue_uris),
+        "manual_mode": "bootstrap" if spotify_manual_queue_bootstrap_active else "tracked",
+        "head_fallback_limit": SPOTIFY_MANUAL_QUEUE_HEAD_FALLBACK_LIMIT,
+        "auto_track_new": SPOTIFY_MANUAL_QUEUE_AUTO_TRACK_NEW,
+    }
+
+
+def _spotify_poll_once():
+    """Run one Spotify poll cycle. Returns False when credentials are missing.
+
+    All Spotify HTTP calls, including album-art searches, happen before state_lock is
+    taken so a slow API never stalls chat processing.
+    """
+    if not _spotify_auth_ready():
+        with state_lock:
+            spotify_queue_state.clear()
+            spotify_queue_status.update({
+                "auth_ready": False,
+                "count": 0,
+                "last_error": "Missing SPOTIFY_CLIENT_ID/SECRET/REFRESH_TOKEN",
+                **_spotify_queue_status_fields(),
+            })
+        broadcast_spotify_queue()
+        broadcast_spotify_queue_status()
+        return False
+
+    queue_snapshot, queue_error = fetch_spotify_queue_state()
+    now_snapshot, _ = fetch_spotify_now_playing_state()
+    if not isinstance(now_snapshot, dict):
+        now_snapshot = {}
+    queue_error_text = queue_error or ""
+    qel = queue_error_text.lower()
+    if queue_error_text:
+        if "403" in qel:
+            queue_error_text = "Spotify API denied queue access (check Premium account + scopes)."
+        elif "404" in qel or "no active device" in qel:
+            queue_error_text = "No active Spotify device. Start playback on Spotify desktop app."
+        elif "401" in qel:
+            queue_error_text = "Spotify token unauthorized. Re-run OAuth helper to refresh credentials."
+
+    spotify_now_available = bool(now_snapshot and now_snapshot.get("available"))
+    fallback_art = None
+    fallback_for = None
+    if spotify_now_available:
+        if not now_snapshot.get("album_art"):
+            now_snapshot["album_art"] = _spotify_find_album_art_for_track(
+                now_snapshot.get("title", ""),
+                now_snapshot.get("artist", "")
+            )
+    else:
+        # Spotify's API has no current item; if the local (winsdk) watcher does, find art for that track.
+        with state_lock:
+            local_available = bool(now_playing_state.get("available"))
+            fallback_for = (now_playing_state.get("title", ""), now_playing_state.get("artist", ""))
+        if local_available:
+            fallback_art = _spotify_find_album_art_for_track(*fallback_for) or ""
+
+    with state_lock:
+        queue_snapshot = _merge_optimistic_spotify_items_unlocked(queue_snapshot)
+        spotify_queue_state[:] = queue_snapshot
+        spotify_queue_status.update({
+            "auth_ready": True,
+            "count": len(queue_snapshot),
+            "last_error": queue_error_text,
+            **_spotify_queue_status_fields(),
+        })
+        if spotify_now_available:
+            if not now_playing_state.get("available"):
+                now_playing_state.update({
+                    "title": now_snapshot.get("title", ""),
+                    "artist": now_snapshot.get("artist", ""),
+                    "elapsed": now_snapshot.get("elapsed_sec", 0),
+                    "duration": now_snapshot.get("duration_sec", 0),
+                    "playing": now_snapshot.get("playing", False),
+                    "available": True
+                })
+            now_playing_state["album_art"] = now_snapshot.get("album_art", "")
+        elif not now_playing_state.get("available"):
+            now_playing_state["album_art"] = ""
+        elif fallback_art is not None and fallback_for == (
+                now_playing_state.get("title", ""), now_playing_state.get("artist", "")):
+            # Only apply the art if the local track has not changed while we were searching.
+            now_playing_state["album_art"] = fallback_art
+    broadcast_spotify_queue()
+    broadcast_spotify_queue_status()
+    broadcast_now_playing()
+    return True
 
 
 def spotify_queue_poller_loop():
     """Poll Spotify Web API queue so queue_widget mirrors Spotify desktop queue."""
-    global spotify_queue_status
     while True:
         try:
-            if not _spotify_auth_ready():
-                with state_lock:
-                    spotify_queue_state.clear()
-                    spotify_queue_status.update({
-                        "auth_ready": False,
-                        "count": 0,
-                        "last_error": "Missing SPOTIFY_CLIENT_ID/SECRET/REFRESH_TOKEN",
-                        "updated_at": int(time.time()),
-                        "manual_only": SPOTIFY_QUEUE_MANUAL_ONLY,
-                        "manual_pending": len(spotify_manual_queue_uris),
-                        "manual_mode": "bootstrap" if spotify_manual_queue_bootstrap_active else "tracked",
-                        "head_fallback_limit": SPOTIFY_MANUAL_QUEUE_HEAD_FALLBACK_LIMIT,
-                        "auto_track_new": SPOTIFY_MANUAL_QUEUE_AUTO_TRACK_NEW
-                    })
-                broadcast_spotify_queue()
-                broadcast_spotify_queue_status()
+            if not _spotify_poll_once():
                 time.sleep(5)
                 continue
-
-            queue_snapshot, queue_error = fetch_spotify_queue_state()
-            now_snapshot, _ = fetch_spotify_now_playing_state()
-            queue_error_text = queue_error or ""
-            qel = queue_error_text.lower()
-            if queue_error_text:
-                if "403" in qel:
-                    queue_error_text = "Spotify API denied queue access (check Premium account + scopes)."
-                elif "404" in qel or "no active device" in qel:
-                    queue_error_text = "No active Spotify device. Start playback on Spotify desktop app."
-                elif "401" in qel:
-                    queue_error_text = "Spotify token unauthorized. Re-run OAuth helper to refresh credentials."
-            with state_lock:
-                spotify_queue_state[:] = queue_snapshot
-                spotify_queue_status.update({
-                    "auth_ready": True,
-                    "count": len(queue_snapshot),
-                    "last_error": queue_error_text,
-                    "updated_at": int(time.time()),
-                    "manual_only": SPOTIFY_QUEUE_MANUAL_ONLY,
-                    "manual_pending": len(spotify_manual_queue_uris),
-                    "manual_mode": "bootstrap" if spotify_manual_queue_bootstrap_active else "tracked",
-                    "head_fallback_limit": SPOTIFY_MANUAL_QUEUE_HEAD_FALLBACK_LIMIT,
-                    "auto_track_new": SPOTIFY_MANUAL_QUEUE_AUTO_TRACK_NEW
-                })
-                if now_snapshot and now_snapshot.get("available"):
-                    if not now_snapshot.get("album_art"):
-                        now_snapshot["album_art"] = _spotify_find_album_art_for_track(
-                            now_snapshot.get("title", ""),
-                            now_snapshot.get("artist", "")
-                        )
-                    if not now_playing_state.get("available"):
-                        now_playing_state.update({
-                            "title": now_snapshot.get("title", ""),
-                            "artist": now_snapshot.get("artist", ""),
-                            "elapsed": now_snapshot.get("elapsed_sec", 0),
-                            "duration": now_snapshot.get("duration_sec", 0),
-                            "playing": now_snapshot.get("playing", False),
-                            "available": True
-                        })
-                    now_playing_state["album_art"] = now_snapshot.get("album_art", "")
-                else:
-                    # If we still have a local now-playing track from winsdk, try to resolve album art via search.
-                    if now_playing_state.get("available"):
-                        fallback_art = _spotify_find_album_art_for_track(
-                            now_playing_state.get("title", ""),
-                            now_playing_state.get("artist", "")
-                        )
-                        now_playing_state["album_art"] = fallback_art or ""
-                    else:
-                        now_playing_state["album_art"] = ""
-            broadcast_spotify_queue()
-            broadcast_spotify_queue_status()
-            broadcast_now_playing()
         except Exception as e:
             try:
                 print(f"[SPOTIFY] Queue poller error: {e}")
@@ -1630,16 +2009,13 @@ def spotify_queue_poller_loop():
                     "auth_ready": _spotify_auth_ready(),
                     "count": 0,
                     "last_error": str(e),
-                    "updated_at": int(time.time()),
-                    "manual_only": SPOTIFY_QUEUE_MANUAL_ONLY,
-                    "manual_pending": len(spotify_manual_queue_uris),
-                    "manual_mode": "bootstrap" if spotify_manual_queue_bootstrap_active else "tracked",
-                    "head_fallback_limit": SPOTIFY_MANUAL_QUEUE_HEAD_FALLBACK_LIMIT,
-                    "auto_track_new": SPOTIFY_MANUAL_QUEUE_AUTO_TRACK_NEW
+                    **_spotify_queue_status_fields(),
                 })
             broadcast_spotify_queue()
             broadcast_spotify_queue_status()
-        time.sleep(SPOTIFY_QUEUE_POLL_SEC)
+        # Sleep until the interval elapses or a request asks for an immediate refresh.
+        spotify_queue_poll_wakeup.wait(SPOTIFY_QUEUE_POLL_SEC)
+        spotify_queue_poll_wakeup.clear()
 
 
 def _track_key(title, artist):
@@ -1696,8 +2072,8 @@ def _is_playing_status(playback_info):
 async def spotify_track_watcher_loop():
     """Watch local Windows media session for Spotify track changes."""
     if not HAS_WINSDK_MEDIA:
-        print("[SPOTIFY] winsdk not installed. Track watcher disabled.")
-        print("          Install with: python -m pip install winsdk")
+        print("[SPOTIFY] Windows media bridge (pywinrt) not installed. Track watcher disabled.")
+        print("          Install with: python -m pip install winrt-runtime winrt-Windows.Foundation winrt-Windows.Media.Control")
         return
 
     print("[SPOTIFY] Track watcher enabled.")
@@ -2722,7 +3098,7 @@ async def twitch_chat_loop():
 
                 nickname, unique_id, msg, is_moderator = parsed
                 if msg:
-                    process_chat_message("twitch", nickname, unique_id, msg, is_moderator=is_moderator)
+                    await _run_chat_pipeline("twitch", nickname, unique_id, msg, is_moderator=is_moderator)
 
         except asyncio.CancelledError:
             break
@@ -2847,33 +3223,30 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
                         if song_norm:
                             request_last_song_by_user[f"{requester_key}|{song_norm}"] = now_ts
 
-                spotify_result = queue_spotify_track_from_request(requested_song, requester=nickname)
-                queue_entry = {'user': nickname, 'song': requested_song, 'ts': time.time(), 'request_key': requester_key}
-                if spotify_result.get('ok'):
-                    try:
-                        track_duration_ms = int(spotify_result.get('track_duration_ms', 0) or 0)
-                    except:
-                        track_duration_ms = 0
-                    if track_duration_ms > 0:
-                        queue_entry['duration_sec'] = max(1, int(round(track_duration_ms / 1000.0)))
-                    queue_entry['spotify_track'] = spotify_result.get('track_name', '')
-                    queue_entry['spotify_artist'] = spotify_result.get('track_artists', '')
-                    queue_entry['album_art'] = spotify_result.get('album_art', '')
+                # Show the request on the overlay immediately; Spotify lookup happens in the background.
+                request_id = next(_request_id_counter)
+                queue_entry = {
+                    'user': nickname, 'song': requested_song, 'ts': time.time(),
+                    'request_key': requester_key, 'request_id': request_id
+                }
                 with state_lock:
                     song_queue.append(queue_entry)
                     prune_song_queue_unlocked()
                 broadcast_queue()
-                if spotify_result.get('ok'):
-                    print(
-                        f"   Request added + queued on Spotify: "
-                        f"{spotify_result.get('track_name', requested_song)} - "
-                        f"{spotify_result.get('track_artists', '')} (by {safe_name})"
-                    )
-                    if spotify_result.get('device_id_used'):
-                        print(f"   Spotify device used: {spotify_result.get('device_id_used')}")
+
+                if not SPOTIFY_QUEUE_ON_REQUEST:
+                    spotify_result = {"ok": False, "reason": "spotify_queue_on_request_disabled"}
+                elif not _spotify_auth_ready():
+                    spotify_result = {"ok": False, "reason": "spotify_auth_not_configured"}
+                else:
+                    spotify_result = {"ok": False, "pending": True, "reason": "resolving"}
+                    _dispatch_spotify_request(request_id, requested_song, nickname)
+
+                if spotify_result.get('pending'):
+                    print(f"   Request added: {requested_song} (by {safe_name}); resolving on Spotify in background")
                 else:
                     print(f"   Request added (local queue only): {requested_song} (by {safe_name})")
-                    print(f"   Spotify queue add skipped/failed: {spotify_result.get('reason', 'unknown_error')}")
+                    print(f"   Spotify queue add skipped: {spotify_result.get('reason', 'unknown_error')}")
                 return {
                     'action': 'request',
                     'song': requested_song,
@@ -2884,7 +3257,8 @@ def process_comment(nickname, unique_id, msg, is_moderator=False):
                         'reason': 'queued',
                         'user': nickname,
                         'song': requested_song,
-                        'spotify_queued': bool(spotify_result.get('ok'))
+                        'spotify_queued': False,
+                        'spotify_pending': bool(spotify_result.get('pending'))
                     }
                 }
 
@@ -3004,7 +3378,7 @@ def create_client_and_connect():
             
             if not msg:
                 return
-            process_chat_message(
+            await _run_chat_pipeline(
                 "tiktok", nickname, voter_id, msg,
                 is_moderator=is_mod(nickname, unique_id) or is_mod(nickname, voter_id),
             )

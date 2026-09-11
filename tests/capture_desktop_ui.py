@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import tkinter as tk
+from unittest.mock import MagicMock
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -86,15 +87,24 @@ def main():
                 time.sleep(0.15)
                 capture_window(root, destination / (page + '.png'))
             app.process.settings = {'PORT': '5000'}
+            app.process.server = MagicMock()  # stand-in so the view treats the session as live
+            app.process.server.poll.return_value = None
             app.running = True
-            app.view.show_page('overlays')
+            app.set_active(True)
             app.view.set_session('running')
             app.update_urls()
             app.status.set('Preview is running. No live chat or playback connections.')
+            app.view.show_page('home')
+            root.update()
+            capture_window(root, destination / 'running-home.png')
+            app.view.show_page('overlays')
             root.update()
             capture_window(root, destination / 'running-overlays.png')
             app.running = False
+            app.process.server = None
+            app.set_active(False)
             app.view.set_session('stopped')
+            app.view.links_ready(False)
             app.view.refresh_settings()
             app.view.show_page('setup')
             root.geometry('900x620+60+40')

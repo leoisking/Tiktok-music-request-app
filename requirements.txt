@@ -1,4 +1,7 @@
 Flask==3.1.2
 Flask-SocketIO==5.6.0
 TikTokLive==6.6.5
-winsdk==1.0.0b10
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Media.Control==3.2.1
+

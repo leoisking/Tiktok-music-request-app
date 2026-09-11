@@ -19,6 +19,9 @@ spotify_manual_queue_state.json.tmp
 build/
 dist/
 
+# Local tooling configuration
+.claude/
+
 # Local Windows convenience files
 *.lnk
 __tmp_test.bat

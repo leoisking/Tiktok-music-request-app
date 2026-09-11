@@ -15,6 +15,7 @@ Notable project changes are documented here. The project does not yet publish nu
 - Added controlled child-process shutdown and parent-process monitoring.
 - Added optional bundled Cloudflare Quick Tunnel support.
 - Added browser-based Spotify authorization using each user's own developer app.
+- Redesigned the launcher to match the overlays: violet accent and navy surfaces, Segoe UI Variable type, a new Home page with a live session card, overlay links, and a set-up checklist, one session indicator in the sidebar, a footer that shows Start or Stop depending on state, toggle switches instead of checkboxes, and OBS size hints beside each overlay link. The app icon is now violet.
 
 ### Overlay and backend
 
@@ -25,6 +26,16 @@ Notable project changes are documented here. The project does not yet publish nu
 - Added transparent skip-overlay behavior and separate queue-source selection.
 - Improved reconnect status, offline behavior, playback timing, and album-art fallback.
 - Improved moderator controls, acknowledgements, validation, and rate limits.
+- Made `!req` show on the overlay immediately; Spotify search and queue-add now run on a background worker and enrich the entry when they finish.
+- Mirrored newly queued tracks into the Spotify "Up Next" list at once and wake the poller instead of waiting for the next interval.
+- Moved chat processing off the TikTok and Twitch event loops so a slow request never delays skip votes.
+- Reused HTTPS connections to Spotify, stopped searching after a confident match, and ran remaining searches in parallel.
+- Cached the Spotify device id and album-art lookups, and moved all Spotify HTTP calls and state-file writes out from under the shared state lock.
+- Overlays now try the WebSocket transport before long-polling.
+- Redesigned both overlays and the control panel as one "album-art glass" system: frosted cards tinted by the current album art, Plus Jakarta Sans + Inter, calmer motion, album-art thumbnails in every queue row, and a dashboard layout for the control page.
+- Added `tests/edge_overlay_check.py`, a headless Microsoft Edge port of the browser overlay checks for machines without Node.
+- Switched the Windows media bridge from the unmaintained `winsdk` package to pinned `winrt-*` packages (including `winrt-Windows.Foundation`, which async calls require) in the requirements, the PyInstaller spec, and the launcher self-test.
+- Fixed the batch launchers' control-password prompt: values are validated by Python from the environment, so shell metacharacters, whitespace-only input, and a pre-set password are handled correctly and the prompt can no longer loop forever.
 
 ### Security
 
