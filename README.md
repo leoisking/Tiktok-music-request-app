@@ -1,83 +1,78 @@
-Note: If Windows shows a SmartScreen warning, click More info → Run anyway. This is expected for unsigned open-source apps.
+# 🎵 Live Widget
+
+Live Widget is a real-time song-request and skip-voting overlay for TikTok Live and Twitch. It features transparent OBS/TikTok Studio overlays, a password-protected control panel, optional Spotify queue integration, and a standalone Windows launcher.
+
+> ⚠️ **Note:** If Windows shows a SmartScreen warning during setup, click *More info* → *Run anyway*. This is expected for unsigned open-source applications.
+
+---
+
+## 🔍 App Preview
+
+### Desktop UI
+<img width="1123" height="855" alt="Desktop UI Preview" src="https://github.com/user-attachments/assets/d19a5db3-ee7d-4a4c-bc5e-b3cea1d1038e" />
+
+### Queue Overlay Widget
+<img width="926" height="891" alt="Queue Overlay Preview" src="https://github.com/user-attachments/assets/818447eb-30a0-4632-af22-a4df4108ddec" />
+
+---
+
+## 📌 Table of Contents
+* [Highlights](#toc-highlights)
+* [Choose a Setup](#toc-setup)
+* [Quick Start Guides](#toc-guides)
+  * [Windows App Quick Start](#toc-win-start)
+  * [Run from Source (Python)](#toc-src-start)
+* [Overlay URLs](#toc-urls)
+* [Chat Commands](#toc-commands)
+* [Spotify & Public HTTPS](#toc-spotify)
+* [Build & Test](#toc-build)
+* [Project Architecture](#toc-project)
+* [Security & Troubleshooting](#toc-security)
 
 
-# Live Widget
 
-Live Widget is a real-time song-request and skip-voting overlay for TikTok Live and Twitch. It includes transparent OBS/TikTok Studio overlays, a password-protected control panel, optional Spotify queue integration, and a standalone Windows launcher.
 
-## Highlights
 
-- TikTok, Twitch, or combined live-chat input
-- `!req` song requests and `!skip` voting
-- Adaptive or fixed skip thresholds
-- Separate skip and queue browser-source overlays
-- Password-protected moderator controls
-- Optional Spotify playback and queue integration
-- Optional Cloudflare HTTPS links for TikTok Studio
-- Standalone Windows EXE with protected per-user settings
 
-## Choose a setup
+---
+
+## <div id="toc-highlights"></div>✨ Highlights
+
+* **Multi-Platform Chat Input:** Connects seamlessly with TikTok, Twitch, or combined live-chats.
+* **Viewer Commands:** Interactive `!req` song requests and `!skip` voting systems.
+* **Smart Thresholds:** Uses adaptive or fixed skip thresholds to match your audience size.
+* **OBS Integration:** Dispatches separate, transparent skip and queue browser-source overlays.
+* **Moderator Control Panel:** Protected via standard dashboard authentication.
+* **Spotify Integration:** Optional automated playback handling and queue management.
+* **TikTok Studio Compatibility:** Optional Cloudflare HTTPS tunnel integration.
+* **Secure Environment:** Packages a standalone Windows EXE with DPAPI-protected user data.
+
+---
+
+## <div id="toc-setup"></div>🛠️ Choose a Setup
 
 | Setup | Best for | Requirements |
-| --- | --- | --- |
-| Windows app | Streamers who want a graphical launcher | 64-bit Windows 10 or 11 |
-| Python source | Development and customization | Python 3.14 and project dependencies |
-| Batch launcher | Existing Windows source installations | Python, Cloudflare, and environment configuration |
+| :--- | :--- | :--- |
+| **Windows App** | Streamers who want a graphical desktop launcher | 64-bit Windows 10 or 11 |
+| **Python Source** | Development, customization, and multi-platform workflows | Python 3.14 + project dependencies |
+| **Batch Launcher** | Quick automation for existing local source installations | Python, Cloudflare, & environment configurations |
 
-## Windows app quick start
+---
 
-1. Download a published `LiveWidget-Windows-x64.zip` release, or build it from source.
-2. Extract the ZIP before opening the app. Do not run the EXE from inside the compressed folder.
-3. Open `LiveWidget.exe` and leave the chat source on **Preview** for the first test.
-4. Copy the generated control password and select **Start preview**.
-5. Paste the password into the control panel that opens in your browser.
-6. Open **Overlay links** and copy the skip or queue URL into an OBS browser source.
+## <div id="toc-guides"></div>🚀 Quick Start Guides
 
-Settings, credentials, logs, and queue state are stored under `%LOCALAPPDATA%\LiveWidget`. Replacing the EXE does not remove those settings.
+### <div id="toc-win-start"></div>1. Windows App Quick Start
+1. Download a published `LiveWidget-Windows-x64.zip` package from the repository releases.
+2. **Extract the ZIP file** before opening the app. *Do not run the EXE directly from inside a compressed folder.*
+3. Launch `LiveWidget.exe` and leave the chat source set to **Preview** for your first initialization test.
+4. Copy the freshly generated control password and click **Start preview**.
+5. Paste the password into the configuration panel that launches in your default browser.
+6. Open the **Overlay links** window and copy either the skip or queue URL into an OBS browser source.
 
-See [DISTRIBUTION.md](DISTRIBUTION.md) for the complete recipient and distribution guide.
+> ℹ️ *Note: Configuration records, local logs, and active queues are securely retained in `%LOCALAPPDATA%\LiveWidget`. Replacing the `LiveWidget.exe` file during updates will not remove these settings.* See [DISTRIBUTION.md](DISTRIBUTION.md) for full delivery workflows.
 
-## Overlay URLs
-
-| Page | Local URL | Safe to show on stream? |
-| --- | --- | --- |
-| Skip overlay | `http://127.0.0.1:5000/` | Yes |
-| Queue overlay | `http://127.0.0.1:5000/queue_widget` | Yes |
-| Control panel | `http://127.0.0.1:5000/control` | **No** |
-
-The control panel always requires `CONTROL_PASSWORD`, including from the same computer. Never place the control URL or password in an on-stream source.
-
-## Chat commands
-
-### Viewers
-
-| Command | Action |
-| --- | --- |
-| `!req Song by Artist` | Add a song request |
-| `!skip` | Vote to skip the current song |
-
-### Moderators
-
-| Command | Action |
-| --- | --- |
-| `!clear` | Clear local song requests |
-| `!reset` or `!next` | Reset skip votes |
-| `!threshold 8` | Set a temporary threshold |
-| `!threshold auto` | Return to automatic/fixed configuration |
-
-Moderator entries are account usernames or stable IDs, not display names. Prefix Twitch entries with `twitch:` when configuring `MOD_LIST`.
-
-## Spotify and public HTTPS
-
-Spotify is optional. Each distributor or user must provide credentials for their own Spotify developer app and authorize their own account. The launcher protects saved secrets with Windows DPAPI for the current Windows user.
-
-For TikTok Studio, select **Public HTTPS** in the launcher. The bundled Cloudflare client creates temporary HTTPS overlay links. Quick Tunnel URLs change when restarted and do not provide an uptime guarantee.
-
-Live chat, Spotify, Cloudflare, fonts, and Socket.IO CDN assets require internet access. Preview mode does not connect to live chat or control playback.
-
-## Run from source
-
-Clone the repository, create a virtual environment, and install the runtime dependencies:
+### <div id="toc-src-start"></div>2. Run from Source (Python)
+Clone the repository, create an isolated virtual environment, and install the required dependencies:
 
 ```powershell
 git clone https://github.com/leoisking/flask-tiktok-socket-setup.git
@@ -87,7 +82,7 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Set at least a control password and the account required by your chat source:
+Configure your control credentials and your target stream chat platform hook:
 
 ```powershell
 $env:CHAT_SOURCE = "tiktok"
@@ -95,87 +90,114 @@ $env:TIKTOK_USER = "your_username"
 $env:CONTROL_PASSWORD = "replace-with-a-long-unique-password"
 python live_widget.py
 ```
+* **Twitch Configuration:** Set `$env:CHAT_SOURCE = "twitch"` and supply a target channel to `$env:TWITCH_CHANNEL`.
+* **Dual Integration:** Set `$env:CHAT_SOURCE = "both"` to aggregate chat streams simultaneously.
+* **Note:** Leave `ALLOWED_ORIGINS` unset to force safe, same-origin restrictions. Wildcards (`*`) are explicitly blocked.
 
-For Twitch, use `CHAT_SOURCE=twitch` and set `TWITCH_CHANNEL`. Use `CHAT_SOURCE=both` to connect both services.
+---
 
-Leave `ALLOWED_ORIGINS` unset for same-origin overlays. Wildcard origins are intentionally rejected.
+## <div id="toc-urls"></div>🗺️ Overlay URLs
 
-## Build the Windows release
+| Page View | Local Address Target | Safe to Show on Stream? |
+| :--- | :--- | :--- |
+| **Skip Overlay** | `http://127.0.0.1:5000/` | **Yes** |
+| **Queue Overlay** | `http://127.0.0.1:5000/queue_widget` | **Yes** |
+| **Control Panel** | `http://127.0.0.1:5000/control` | 🚫 **No** |
 
-On 64-bit Windows with Python 3.14 installed:
+> 🔒 *The dashboard always demands your explicit `CONTROL_PASSWORD`. Never expose the control URL or its password to your live video feed.*
 
+---
+
+## <div id="toc-commands"></div>💬 Chat Commands
+
+### Viewers
+
+| Command | Action Description |
+| :--- | :--- |
+| ``!req <Song Name> by <Artist>`` | Append a new track choice to the live request queue |
+| ``!skip`` | Lodge a community vote to automatically skip the active song |
+
+### Moderators
+
+| Command | Action Description |
+| :--- | :--- |
+| ``!clear`` | Wipe out all current local song requests |
+| ``!reset`` or ``!next`` | Instantly clear the accumulated skip counts |
+| ``!threshold <number>`` | Apply a fixed temporary skip vote limit (e.g., `!threshold 8`) |
+| ``!threshold auto`` | Revert processing back to automated/calculated metrics |
+
+> 🏷️ *Moderator records require account handles or permanent stable IDs rather than friendly display aliases. Prefix Twitch entries with `twitch:` inside your custom `MOD_LIST` variables.*
+
+---
+
+## <div id="toc-spotify"></div>🎵 Spotify and Public HTTPS
+
+* **Spotify Setup:** Integration is completely optional. Each streamer must register their own developer portal application client, supply custom secrets, and sign in to their profile. Launcher assets wrap these values via **Windows DPAPI encryption** tied directly to the local Windows profile.
+* **TikTok Studio Links:** Toggle the **Public HTTPS** option within your graphical interface. The integrated Cloudflare runtime initiates temporary HTTPS proxy links. *Quick Tunnel endpoints change across restarts and do not provide service uptime guarantees.*
+* **Network Dependencies:** Real-time chat tracking, Spotify connectivity, Cloudflare tunneling, web fonts, and Socket.IO CDNs demand active internet connections. Running in *Preview Mode* bypasses external platform calls.
+
+---
+
+## <div id="toc-build"></div>🛠️ Build & Test
+
+### Production Building
+Compile a packaged standalone 64-bit Windows binary (Requires Python 3.14+):
 ```powershell
 .\build_windows.bat
 ```
+The automated script isolates dependencies, executes the test matrix, links the embedded `LiveWidget.ico` asset, packages verified Cloudflare bin targets, runs automated GUI smoke tests, and exports the final deployment models:
+* `dist/LiveWidget.exe`
+* `dist/LiveWidget-Windows-x64.zip`
 
-The build creates an isolated environment, installs pinned build dependencies, runs the test suite, embeds `LiveWidget.ico`, packages a checksum-verified Cloudflare binary, smoke-tests the standalone EXE, and writes:
+> 🛑 *Build environments (`build/`), distribution objects (`dist/`), localized credentials, application logs, and current queue state arrays are natively blocked by Git ignores. Publish the output ZIP file to GitHub Releases for consumer consumption.*
 
-```text
-dist/LiveWidget.exe
-dist/LiveWidget-Windows-x64.zip
-```
-
-The `build/`, `dist/`, local credentials, logs, and runtime state are intentionally excluded from Git. Publish the ZIP through GitHub Releases when you want users to download a binary update.
-
-## Test
-
-Run the isolated Python tests:
-
+### Running System Tests
+Run the standard Python unit test suites:
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
-
-Optional browser-overlay checks require Node.js and Playwright:
-
+Automated browser testing requires Node.js and Playwright framework targets:
 ```powershell
 npm install --no-save playwright
 npx playwright install chromium
 node tests/test_overlays.cjs
 ```
-
-Without Node, run the same overlay checks through headless Microsoft Edge:
-
+Alternatively, execute headless edge checks if Node runtimes are missing:
 ```powershell
 python tests/edge_overlay_check.py --screenshots .\overlay-screenshots
 ```
 
-The build process also runs a standalone EXE smoke test covering the GUI, local HTTP pages, WebSocket authentication, protected settings, and clean shutdown.
+---
 
-## Project layout
+## <div id="toc-project"></div>📂 Project Architecture
 
 ```text
-desktop_launcher.py      Windows desktop entry point
-desktop_ui.py            Launcher presentation and interaction layer
-desktop_runtime.py       Settings and process management
-live_widget.py           Flask/Socket.IO server and chat integrations
-index.html               Skip overlay and control workspace
-queue_widget.html        Queue overlay
-spotify_oauth_helper.py  Local Spotify OAuth flow
-tests/                    Backend, launcher, security, and UI tests
-LiveWidget.spec           PyInstaller configuration
-build_windows.py          Reproducible Windows build pipeline
+├── desktop_launcher.py      # Windows application core entry point
+├── desktop_ui.py            # GUI layer presentation and framework interactions
+├── desktop_runtime.py       # Configuration manager and background thread handling
+├── live_widget.py           # Core Flask/Socket.IO microserver and chat processing engine
+├── index.html               # Frontend presentation for skip overlays and dashboards
+├── queue_widget.html        # Frontend presentation for song queue boards
+├── spotify_oauth_helper.py  # Localized OAuth validation token handler for Spotify
+├── tests/                   # Backend engine, wrapper, security, and rendering tests
+├── LiveWidget.spec          # PyInstaller configuration profile
+└── build_windows.py         # Reproducible pipeline rules for Windows binary creation
 ```
 
-## Security and privacy
+---
 
-Read [SECURITY.md](SECURITY.md) before exposing the widget through a public tunnel. In particular:
+## <div id="toc-security"></div>🛡️ Security and privacy
 
-- Use a unique control password.
-- Keep the control panel off-stream.
-- Do not commit `.env`, `spotify_env.bat`, logs, queue state, tokens, or build output.
-- Rotate credentials that were previously shared or committed.
-- Test real account connections before going live.
+Review [SECURITY.md](SECURITY.md) guidelines completely prior to creating active public tunnels. Ensure you:
+1. Generate an explicit, unique `CONTROL_PASSWORD`.
+2. Keep the administrative control web pages out of your active video screen captures.
+3. Prevent raw `.env`, `spotify_env.bat`, localized queue tables, runtime tokens, or `/dist` assets from getting pushed to repository branches.
+4. Promptly cycle passwords or access keys if credentials are accidentally exposed or shared.
 
-## Troubleshooting
+---
 
-- **The EXE icon looks generic:** extract the ZIP first. Windows can show a generic icon inside compressed-folder views; refresh Explorer if an older icon is cached.
-- **The port is busy:** stop the other widget instance or choose another local port.
-- **The overlay works but chat does not:** check `server.log` and verify that the configured account is currently live.
-- **Spotify does not queue songs:** verify app access, scopes, active playback device, and all three Spotify credentials.
-- **The HTTPS link is not ready:** wait briefly, then inspect `cloudflared.log` and restart the session if needed.
+## ❓ Troubleshooting
 
-## License
-
-This repository does not currently include a software license. Until the owner adds one, no open-source redistribution rights are granted by default. Before public distribution or accepting outside contributions, choose and add a license that matches the intended use of the code and bundled artwork.
-
-Third-party components retain their own licenses. Windows builds include `THIRD_PARTY_LICENSES.txt`.
+* **The application icon is generic:** Ensure you have fully extracted your download ZIP before launching. Windows file paths can fail to parse icons accurately inside compressed system screens.
+* **The designated network port is busy:** Shut down competing background server runtimes or pick an alternative local port mapping in the GUI settings.
+* **Overlays render properly but chat tracking fails:** Inspect your local `server.log` file and verify your specified account destination is live broadcasting.
