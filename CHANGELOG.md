@@ -34,6 +34,7 @@ Notable project changes are documented here. The project does not yet publish nu
 - Overlays now try the WebSocket transport before long-polling.
 - Redesigned both overlays and the control panel as one "album-art glass" system: frosted cards tinted by the current album art, Plus Jakarta Sans + Inter, calmer motion, album-art thumbnails in every queue row, and a dashboard layout for the control page.
 - Added `tests/edge_overlay_check.py`, a headless Microsoft Edge port of the browser overlay checks for machines without Node.
+- Spotify HTTPS calls (sign-in, search, queue, polling) now verify certificates with Python 3.13+'s strict RFC 5280 extension checks turned off, so chains from otherwise-trusted TLS-inspection firewalls that omit the Authority Key Identifier are accepted the way browsers accept them. Certificate verification and hostname checks stay on. Certificate failures during sign-in now explain that the network is intercepting HTTPS.
 - Switched the Windows media bridge from the unmaintained `winsdk` package to pinned `winrt-*` packages (including `winrt-Windows.Foundation`, which async calls require) in the requirements, the PyInstaller spec, and the launcher self-test.
 - Fixed the batch launchers' control-password prompt: values are validated by Python from the environment, so shell metacharacters, whitespace-only input, and a pre-set password are handled correctly and the prompt can no longer loop forever.
 

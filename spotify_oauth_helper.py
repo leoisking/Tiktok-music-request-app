@@ -2,7 +2,9 @@ import base64
 import json
 import os
 import secrets
+import ssl
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -13,6 +15,33 @@ AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 DEFAULT_REDIRECT_URI = "http://127.0.0.1:8888/callback"
 SCOPES = "user-modify-playback-state user-read-playback-state user-read-currently-playing"
+CERTIFICATE_HELP = (
+    "Could not verify Spotify's HTTPS certificate. A firewall or security product on this network is "
+    "intercepting HTTPS traffic. Use a network without inspection (for example your home connection), or set the "
+    "SSL_CERT_FILE environment variable to a certificate bundle that includes that product's root certificate."
+)
+
+
+def verifying_ssl_context():
+    """Full certificate and hostname verification without Python 3.13+'s strict RFC 5280 extension checks.
+
+    Strict mode rejects otherwise-trusted CA certificates that omit the Authority Key Identifier
+    extension, which is common for corporate TLS-inspection firewalls. Browsers accept those chains,
+    so the app does too. Verification itself is never disabled.
+    """
+    context = ssl.create_default_context()
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return context
+
+
+def _is_certificate_error(error):
+    while error is not None:
+        if isinstance(error, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(error, ssl.SSLError) and "CERTIFICATE_VERIFY_FAILED" in str(error):
+            return True
+        error = getattr(error, "reason", None) if isinstance(error, urllib.error.URLError) else getattr(error, "__cause__", None)
+    return False
 
 
 def _build_basic_auth(client_id, client_secret):
@@ -37,8 +66,13 @@ def _exchange_code_for_tokens(client_id, client_secret, code, redirect_uri):
             "Content-Type": "application/x-www-form-urlencoded",
         },
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=verifying_ssl_context()) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, ssl.SSLError) as error:
+        if _is_certificate_error(error):
+            raise RuntimeError(CERTIFICATE_HELP) from error
+        raise
     return payload
 
 

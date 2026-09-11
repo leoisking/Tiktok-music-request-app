@@ -2,6 +2,7 @@ import asyncio
 import http.client
 import json
 import os
+import ssl
 import tempfile
 import threading
 import time
@@ -199,6 +200,7 @@ class FakeConnection:
 
     def __init__(self, host, timeout=None, **kwargs):
         self.host = host
+        self.kwargs = kwargs
         self.calls = []
         self.closed = False
         FakeConnection.instances.append(self)
@@ -246,6 +248,14 @@ class SpotifyHttpTests(unittest.TestCase):
         self.assertEqual(len(self.api_connections()), 1)
         self.assertEqual([url for _, url in self.api_connections()[0].calls],
                          ['/v1/me/player/queue', '/v1/me/player/currently-playing'])
+
+    def test_connections_verify_certificates_without_strict_x509(self):
+        widget._spotify_api_request("GET", "/me/player/queue")
+        context = self.api_connections()[0].kwargs.get('context')
+        self.assertIsInstance(context, ssl.SSLContext)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertFalse(context.verify_flags & ssl.VERIFY_X509_STRICT)
 
     def test_stale_connection_is_replaced_and_request_retried(self):
         widget._spotify_api_request("GET", "/me/player/queue")

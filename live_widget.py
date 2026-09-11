@@ -24,6 +24,7 @@ from flask import Flask, send_file, request
 from flask_socketio import SocketIO
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import CommentEvent
+from spotify_oauth_helper import verifying_ssl_context
 try:
     from TikTokLive.events import RoomUserSeqEvent
 except Exception:
@@ -219,6 +220,7 @@ state_write_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sta
 _request_id_counter = itertools.count(1)
 # Per-thread keep-alive HTTPS connections to Spotify hosts (http.client is not thread-safe).
 _spotify_http_local = threading.local()
+_spotify_ssl_context_cache = None
 spotify_device_lock = threading.Lock()
 spotify_device_cache = {"id": "", "ts": 0.0}
 album_art_cache = OrderedDict()
@@ -900,6 +902,14 @@ def _spotify_get_access_token():
         return _spotify_refresh_access_token()
 
 
+def _spotify_ssl_context():
+    """One shared verifying context; SSLContext objects are safe to reuse across threads."""
+    global _spotify_ssl_context_cache
+    if _spotify_ssl_context_cache is None:
+        _spotify_ssl_context_cache = verifying_ssl_context()
+    return _spotify_ssl_context_cache
+
+
 def _spotify_http_connection(host):
     conns = getattr(_spotify_http_local, "conns", None)
     if conns is None:
@@ -907,7 +917,7 @@ def _spotify_http_connection(host):
         _spotify_http_local.conns = conns
     conn = conns.get(host)
     if conn is None:
-        conn = http.client.HTTPSConnection(host, timeout=SPOTIFY_HTTP_TIMEOUT_SEC)
+        conn = http.client.HTTPSConnection(host, timeout=SPOTIFY_HTTP_TIMEOUT_SEC, context=_spotify_ssl_context())
         conns[host] = conn
     return conn
 
