@@ -799,20 +799,30 @@
         }
 
         function syncQueueSourceAndRender() {
+            let sourceItems;
             if (FORCE_SPOTIFY_SOURCE) {
                 usingSpotifyQueue = true;
-                queueItems = Array.isArray(spotifyQueueItems) ? spotifyQueueItems : [];
+                sourceItems = Array.isArray(spotifyQueueItems) ? spotifyQueueItems : [];
             } else if (AUTO_SOURCE_MODE) {
                 const spotifyReady = !!(spotifyQueueStatus && spotifyQueueStatus.auth_ready);
                 // Keep accepted viewer requests visible while Spotify syncs an empty queue.
                 usingSpotifyQueue = spotifyReady && spotifyQueueItems.length > 0;
-                queueItems = usingSpotifyQueue
+                sourceItems = usingSpotifyQueue
                     ? spotifyQueueItems
                     : (Array.isArray(requestQueueItems) ? requestQueueItems : []);
             } else {
                 usingSpotifyQueue = false;
-                queueItems = Array.isArray(requestQueueItems) ? requestQueueItems : [];
+                sourceItems = Array.isArray(requestQueueItems) ? requestQueueItems : [];
             }
+            queueItems = sourceItems.filter(function(item) {
+                if (!nowPlaying || !nowPlaying.available) return true;
+                const requested = parseSong(String(item && item.song || ''));
+                const title = String(item && item.spotify_track || requested.title).trim().toLowerCase();
+                const artist = String(item && item.spotify_artist || requested.artist).trim().toLowerCase();
+                const currentTitle = String(nowPlaying.title || '').trim().toLowerCase();
+                const currentArtist = String(nowPlaying.artist || '').trim().toLowerCase();
+                return !(title === currentTitle && artist === currentArtist);
+            });
             renderQueue();
         }
 
@@ -1004,6 +1014,7 @@
                 nowAnchorMs = 0;
                 nowDisplayedElapsed = 0;
                 stopAnimation();
+                syncQueueSourceAndRender();
                 renderNow();
                 return;
             }
@@ -1050,6 +1061,7 @@
             } else {
                 stopAnimation();
             }
+            syncQueueSourceAndRender();
             renderNow();
             refreshQueueEtaLabels();
         }

@@ -376,6 +376,9 @@ def check_queue_widget(edge, url, checker, shots):
     checker.check(page.evaluate("document.getElementById('queue-status').getAttribute('data-level')") == "warn",
                   "problem status is tagged warn")
     checker.check(page.visible("#queue-status"), "problem status is shown")
+    page.evaluate("handleNow({available: true, title: 'First Request', artist: 'Artist', elapsed: 0, duration: 200, playing: true}); true")
+    checker.check("First Request" not in page.evaluate("document.getElementById('queue-list').textContent"),
+                  "currently playing request is excluded from the upcoming queue")
     elapsed = page.evaluate("""(() => {
         handleNow({available: true, title: 'Test Song', artist: 'Artist', elapsed: 30, duration: 200, playing: false});
         nowAnchorMs = Date.now() - 90000;
