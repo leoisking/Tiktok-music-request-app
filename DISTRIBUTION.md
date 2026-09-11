@@ -17,8 +17,9 @@ The supplied overlay artwork/branding is unchanged. The desktop launcher does no
 
 ## Using the desktop interface
 
-The launcher uses a dark theme, dedicated navigation, and a matching waveform icon. Stream setup has a two-column layout on larger windows and stacks on smaller ones. Pages scroll while Start, Stop, and Save settings stay accessible in the bottom bar.
+The launcher uses a dark theme that matches the overlays, dedicated navigation, and a matching waveform icon. Stream setup has a two-column layout on larger windows and stacks on smaller ones. Pages scroll while Save settings and the session button stay accessible in the bottom bar. The session button reads Start while stopped and turns into Stop while running; the sidebar shows the same state next to a colored dot.
 
+- **Home:** see whether the widget is running, start or stop it, copy the overlay links once it is up, and check the set-up checklist for anything still missing.
 - **Stream setup:** choose your chat source, enter the relevant usernames, select local or public overlays, and copy your private control password.
 - **Overlay links:** copy or open your skip, queue, and private control pages. Links become available only after the local server is ready; HTTPS labels indicate an assigned public link, not a guaranteed live connection.
 - **Connections:** connect Spotify in your browser, cancel an unfinished sign-in, or expand Advanced Spotify settings for an existing refresh token/device ID. Optional Twitch bot credentials are here too.

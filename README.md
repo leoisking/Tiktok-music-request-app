@@ -133,6 +133,12 @@ npx playwright install chromium
 node tests/test_overlays.cjs
 ```
 
+Without Node, run the same overlay checks through headless Microsoft Edge:
+
+```powershell
+python tests/edge_overlay_check.py --screenshots .\overlay-screenshots
+```
+
 The build process also runs a standalone EXE smoke test covering the GUI, local HTTP pages, WebSocket authentication, protected settings, and clean shutdown.
 
 ## Project layout

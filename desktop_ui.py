@@ -1,29 +1,52 @@
-"""Dark, keyboard-accessible presentation layer for the desktop launcher."""
+"""Dark, keyboard-accessible presentation layer for the desktop launcher.
+
+Visual system matches the redesigned overlays: deep navy surfaces, one violet accent,
+mint reserved for the running state.
+"""
 
 import base64
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from desktop_branding import icon_png
 
 
-BACKGROUND = '#0c1119'
-SIDEBAR = '#101722'
-SURFACE = '#161f2c'
-INPUT = '#0f1722'
-BORDER = '#2b394b'
-TEXT = '#edf2f8'
-MUTED = '#9cacc1'
-ACCENT = '#80ebc5'
-ACCENT_DARK = '#193b32'
-ERROR = '#ff9aa7'
+BACKGROUND = '#0b0d12'
+SIDEBAR = '#0e1118'
+SURFACE = '#141822'
+SURFACE_2 = '#1a1f2b'
+INPUT = SURFACE_2
+BORDER = '#262c3a'
+TEXT = '#f4f6fb'
+MUTED = '#9aa3b5'
+ACCENT = '#8b7cff'
+ACCENT_DARK = '#2a2650'
+ACCENT_TEXT = '#120e2e'
+SUCCESS = '#6fe3b4'
+SUCCESS_DARK = '#1d3a34'
 AMBER = '#f3ce8e'
+ERROR = '#ff9aa7'
+ERROR_DARK = '#3a2230'
 
 PAGES = {
-    'setup': ('01', 'Stream setup', 'Make it your stream.', 'Choose your chat source and where your overlays will run.'),
-    'overlays': ('02', 'Overlay links', 'Your stream, connected.', 'Copy a browser-source link into OBS or TikTok Studio.'),
-    'connections': ('03', 'Connections', 'Bring the music.', 'Connect your own accounts. Spotify is completely optional.'),
-    'preferences': ('04', 'Preferences', 'The details, your way.', 'Tune voting, moderation, and your local workspace.'),
+    'home': ('Home', 'Welcome back.', 'See where your session stands and what is left to set up.'),
+    'setup': ('Stream setup', 'Make it your stream.', 'Choose your chat source and where your overlays will run.'),
+    'overlays': ('Overlay links', 'Your stream, connected.', 'Copy a browser-source link into OBS or TikTok Studio.'),
+    'connections': ('Connections', 'Bring the music.', 'Connect your own accounts. Spotify is completely optional.'),
+    'preferences': ('Preferences', 'The details, your way.', 'Tune voting, moderation, and your local workspace.'),
+}
+LINK_NAMES = ('Skip overlay', 'Queue overlay', 'Control panel')
+LINK_HINTS = {
+    'Skip overlay': 'OBS: add a Browser source at 420 × 760 with a transparent background. Any size works; the meter scales.',
+    'Queue overlay': 'OBS: add a Browser source at 520 × 860 (portrait) or 1280 × 720 (landscape). It fills the size you give it.',
+    'Control panel': 'Open this in your own browser only. Never add it to a scene or share the link.',
+}
+SESSION_STATES = {
+    'stopped': ('Not running', MUTED, 'Ready to start'),
+    'starting': ('Starting…', AMBER, 'Getting your widget ready'),
+    'running': ('Running', SUCCESS, 'Widget server running'),
+    'stopping': ('Stopping…', AMBER, 'Closing your session'),
 }
 
 
@@ -31,6 +54,109 @@ def initial_window_geometry(root):
     width = min(1120, max(900, root.winfo_screenwidth() - 80))
     height = min(820, max(620, root.winfo_screenheight() - 100))
     return f'{width}x{height}'
+
+
+def _installed(family, fallback='Segoe UI'):
+    try:
+        return family if family in set(tkfont.families()) else fallback
+    except tk.TclError:
+        return fallback
+
+
+def display_font():
+    """Heading family: Segoe UI Variable Display on Windows 11, Segoe UI elsewhere."""
+    return _installed('Segoe UI Variable Display')
+
+
+def text_font():
+    """Body family: Segoe UI Variable Text on Windows 11, Segoe UI elsewhere."""
+    return _installed('Segoe UI Variable Text')
+
+
+class Switch(tk.Canvas):
+    """A drawn toggle switch bound to a BooleanVar, with a ttk-like state API."""
+
+    WIDTH, HEIGHT = 44, 24
+
+    def __init__(self, parent, variable, background=SURFACE):
+        super().__init__(parent, width=self.WIDTH, height=self.HEIGHT, background=background,
+                         highlightthickness=2, highlightbackground=background, highlightcolor=ACCENT,
+                         borderwidth=0, cursor='hand2', takefocus=True)
+        self.variable = variable
+        self._disabled = False
+        self._trace = variable.trace_add('write', lambda *arguments: self._draw())
+        self.bind('<Button-1>', lambda event: self.toggle())
+        self.bind('<space>', lambda event: self.toggle())
+        self.bind('<Return>', lambda event: self.toggle())
+        self.bind('<Destroy>', self._release, add='+')
+        self._draw()
+
+    def _release(self, event=None):
+        try:
+            self.variable.trace_remove('write', self._trace)
+        except Exception:
+            pass
+
+    def toggle(self):
+        if self._disabled:
+            return 'break'
+        self.variable.set(not self.variable.get())
+        return 'break'
+
+    def configure(self, cnf=None, **kwargs):
+        if isinstance(cnf, dict):
+            kwargs = {**cnf, **kwargs}
+            cnf = None
+        state = kwargs.pop('state', None)
+        if state is not None:
+            self._disabled = state == 'disabled'
+            self.configure_cursor()
+        result = super().configure(cnf, **kwargs) if (cnf is not None or kwargs) else None
+        self._draw()
+        return result
+
+    config = configure
+
+    def configure_cursor(self):
+        super().configure(cursor='arrow' if self._disabled else 'hand2', takefocus=not self._disabled)
+
+    def state(self, statespec=None):
+        if statespec:
+            for item in statespec:
+                if item in ('disabled', '!disabled'):
+                    self._disabled = item == 'disabled'
+            self.configure_cursor()
+            self._draw()
+        return ('disabled',) if self._disabled else ()
+
+    def instate(self, statespec, callback=None):
+        matches = all((item == 'disabled') == self._disabled for item in statespec if item in ('disabled', '!disabled'))
+        if matches and callback:
+            callback()
+        return matches
+
+    def _draw(self):
+        try:
+            on = bool(self.variable.get())
+        except tk.TclError:
+            return
+        self.delete('all')
+        width, height, radius = self.WIDTH, self.HEIGHT, self.HEIGHT / 2
+        if self._disabled:
+            track = '#3d3966' if on else SURFACE_2
+            outline = '#3d3966' if on else BORDER
+            knob = '#7c7a9a' if on else '#4d5566'
+        else:
+            track = ACCENT if on else SURFACE_2
+            outline = ACCENT if on else '#3a4356'
+            knob = '#ffffff' if on else MUTED
+        self.create_oval(0, 0, height, height, fill=track, outline=outline)
+        self.create_oval(width - height, 0, width, height, fill=track, outline=outline)
+        self.create_rectangle(radius, 0, width - radius, height, fill=track, outline=track)
+        self.create_line(radius, 0, width - radius, 0, fill=outline)
+        self.create_line(radius, height - 1, width - radius, height - 1, fill=outline)
+        knob_x = width - height + 3 if on else 3
+        self.create_oval(knob_x, 3, knob_x + height - 6, height - 3, fill=knob, outline=knob)
 
 
 class LauncherView:
@@ -42,19 +168,26 @@ class LauncherView:
         self.secrets = []
         self.controls = []
         self.nav_buttons = {}
+        self.nav_indicators = {}
         self.pages = {}
-        self.page = 'setup'
+        self.page = 'home'
         self.session_state = 'stopped'
         self.notice_after = None
         self.scroll_after = None
+        self.display_family = display_font()
+        self.text_family = text_font()
         self.mode_text = tk.StringVar()
         self.destination_text = tk.StringVar()
+        self.session_text = tk.StringVar(value='Not running')
+        self.session_detail = tk.StringVar()
         self.saved_text = tk.StringVar(value='Settings stay on this PC')
         self.spotify_badge = tk.StringVar()
         self.link_summary = tk.StringVar(value='Start the widget to generate your overlay links.')
+        self.checklist_details = {name: tk.StringVar() for name in ('source', 'destination', 'spotify')}
+        self.checklist_dots = {}
         app.status = tk.StringVar(value='Preview needs no accounts. Your controls stay private.')
         app.spotify_status = tk.StringVar(value='Use your own developer app. No credentials are included with Live Widget.')
-        app.urls = {name: tk.StringVar() for name in ('Skip overlay', 'Queue overlay', 'Control panel')}
+        app.urls = {name: tk.StringVar() for name in LINK_NAMES}
         app.link_buttons = []
         self.root.title('Live Widget')
         self.root.configure(background=BACKGROUND)
@@ -62,132 +195,145 @@ class LauncherView:
         self.root.minsize(900, 620)
         self.root.columnconfigure(1, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self.root.option_add('*Font', ('Segoe UI', 10))
+        self.root.option_add('*Font', (self.text_family, 10))
         self.icon = tk.PhotoImage(data=base64.b64encode(icon_png(64)))
         self.root.iconphoto(True, self.icon)
         self._styles()
         self._sidebar()
         self._workspace()
+        self._home_page()
         self._setup_page()
         self._overlays_page()
         self._connections_page()
         self._preferences_page()
         self._footer()
         app.configuration_controls = self.controls
-        self.show_page('setup')
+        self.show_page('home')
         self.refresh_settings()
         self.set_active(False)
+        self.set_session('stopped')
         self.root.bind('<MouseWheel>', self._mousewheel, add='+')
         self.root.bind('<Control-s>', lambda event: self._shortcut(app.save))
         self.root.bind('<Control-Return>', lambda event: self._shortcut(app.start))
-        self.root.bind('<Configure>', self._resize_root, add='+')
         self.root.bind('<FocusIn>', self._focus_changed, add='+')
+
+    # ── styling helpers ───────────────────────────────────────────────────
+    def _font(self, size=10, bold=False, display=False):
+        return (self.display_family if display else self.text_family, size, 'bold' if bold else 'normal')
 
     def _styles(self):
         style = ttk.Style(self.root)
         style.theme_use('clam')
-        style.configure('.', font=('Segoe UI', 10), background=SURFACE, foreground=TEXT)
+        style.configure('.', font=self._font(), background=SURFACE, foreground=TEXT)
         style.configure('TEntry', fieldbackground=INPUT, foreground=TEXT, insertcolor=ACCENT,
                         bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(11, 10))
         style.map('TEntry', bordercolor=[('invalid', ERROR), ('focus', ACCENT)],
                   fieldbackground=[('disabled', SURFACE), ('readonly', INPUT)],
                   foreground=[('disabled', MUTED), ('readonly', TEXT)])
-        style.configure('TButton', background='#253448', foreground=TEXT, borderwidth=1, bordercolor='#34465e',
-                        lightcolor='#253448', darkcolor='#253448', padding=(15, 10), font=('Segoe UI', 10, 'bold'),
+        style.configure('TButton', background=SURFACE_2, foreground=TEXT, borderwidth=1, bordercolor='#313a4d',
+                        lightcolor=SURFACE_2, darkcolor=SURFACE_2, padding=(15, 10), font=self._font(bold=True),
                         focuscolor=ACCENT)
-        style.map('TButton', background=[('disabled', SURFACE), ('pressed', '#354963'), ('active', '#30445d')],
-                  foreground=[('disabled', '#78899f')], bordercolor=[('focus', ACCENT), ('disabled', BORDER)])
-        style.configure('Primary.TButton', background=ACCENT, foreground='#0a2119', bordercolor=ACCENT,
-                        lightcolor=ACCENT, darkcolor=ACCENT, padding=(21, 11), focuscolor='#163e30')
-        style.map('Primary.TButton', background=[('disabled', '#264538'), ('pressed', '#55cfa4'), ('active', '#a1f5d6')],
-                  foreground=[('disabled', '#9fbcaf')], bordercolor=[('focus', TEXT), ('disabled', '#264538')])
+        style.map('TButton', background=[('disabled', SURFACE), ('pressed', '#2b3447'), ('active', '#242c3d')],
+                  foreground=[('disabled', '#6f7a90')], bordercolor=[('focus', ACCENT), ('disabled', BORDER)])
+        style.configure('Primary.TButton', background=ACCENT, foreground=ACCENT_TEXT, bordercolor=ACCENT,
+                        lightcolor=ACCENT, darkcolor=ACCENT, padding=(21, 11), focuscolor=ACCENT_TEXT)
+        style.map('Primary.TButton', background=[('disabled', '#3d3966'), ('pressed', '#7466e6'), ('active', '#a396ff')],
+                  foreground=[('disabled', '#9b95c4')], bordercolor=[('focus', TEXT), ('disabled', '#3d3966')])
+        style.configure('Stop.TButton', background=ERROR_DARK, foreground=ERROR, bordercolor='#5a3040',
+                        lightcolor=ERROR_DARK, darkcolor=ERROR_DARK, padding=(21, 11), focuscolor=ERROR)
+        style.map('Stop.TButton', background=[('disabled', '#2a1c24'), ('pressed', '#4a2a3a'), ('active', '#452838')],
+                  foreground=[('disabled', '#8a6470')], bordercolor=[('focus', TEXT), ('disabled', '#3a2230')])
         style.configure('Quiet.TButton', background=SURFACE, bordercolor=BORDER, padding=(12, 8))
-        style.configure('Danger.TButton', foreground=ERROR)
         style.layout('Choice.TRadiobutton', [('Radiobutton.padding', {'sticky': 'nswe', 'children': [
             ('Radiobutton.focus', {'sticky': 'nswe', 'children': [
                 ('Radiobutton.label', {'sticky': 'nswe'})]})]})])
-        style.configure('Choice.TRadiobutton', background=INPUT, foreground=MUTED, borderwidth=1,
-                        relief='solid', padding=(12, 15), anchor='center', justify='center',
-                        font=('Segoe UI', 10, 'bold'), focuscolor=ACCENT)
-        style.map('Choice.TRadiobutton', background=[('selected', ACCENT_DARK), ('active', '#223144')],
-                  foreground=[('disabled', '#83978f'), ('selected', ACCENT), ('active', TEXT)])
-        style.configure('TCheckbutton', background=SURFACE, foreground=TEXT, padding=(0, 6),
-                        indicatorbackground=INPUT, indicatorforeground=ACCENT, focuscolor=ACCENT)
-        style.map('TCheckbutton', background=[('active', SURFACE)], foreground=[('disabled', MUTED)],
-                  indicatorbackground=[('selected', ACCENT_DARK), ('disabled', SURFACE)])
+        style.configure('Choice.TRadiobutton', background=SURFACE_2, foreground=MUTED, borderwidth=1,
+                        bordercolor=BORDER, relief='solid', padding=(12, 15), anchor='center', justify='center',
+                        font=self._font(bold=True), focuscolor=ACCENT)
+        style.map('Choice.TRadiobutton', background=[('selected', ACCENT_DARK), ('active', '#20273a')],
+                  foreground=[('disabled', '#6f7a90'), ('selected', TEXT), ('active', TEXT)],
+                  bordercolor=[('selected', ACCENT)])
         style.configure('Vertical.TScrollbar', background=BORDER, troughcolor=BACKGROUND, borderwidth=0,
                         arrowcolor=MUTED, lightcolor=BORDER, darkcolor=BORDER, width=10)
-        style.map('Vertical.TScrollbar', background=[('active', '#40546e'), ('!active', BORDER)],
+        style.map('Vertical.TScrollbar', background=[('active', '#3a4356'), ('!active', BORDER)],
                   arrowcolor=[('active', TEXT), ('!active', MUTED)])
         style.configure('Session.Horizontal.TProgressbar', troughcolor=SIDEBAR, background=ACCENT,
                         borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
 
-    def _label(self, parent, text='', color=TEXT, size=10, bold=False, variable=None):
-        label = tk.Label(parent, text=text, textvariable=variable, background=parent.cget('background'),
-                         foreground=color, font=('Segoe UI', size, 'bold' if bold else 'normal'),
-                         anchor='w', justify='left', borderwidth=0)
-        return label
+    def _label(self, parent, text='', color=TEXT, size=10, bold=False, variable=None, display=False):
+        return tk.Label(parent, text=text, textvariable=variable, background=parent.cget('background'),
+                        foreground=color, font=self._font(size, bold, display), anchor='w', justify='left', borderwidth=0)
 
-    def _paragraph(self, parent, text='', variable=None, color=MUTED):
-        label = self._label(parent, text, color=color, variable=variable)
+    def _paragraph(self, parent, text='', variable=None, color=MUTED, size=10):
+        label = self._label(parent, text, color=color, variable=variable, size=size)
         label.configure(wraplength=560)
         label.pack(fill='x', pady=(5, 0))
         label.bind('<Configure>', lambda event: label.configure(wraplength=max(180, event.width - 4)))
         return label
 
-    def _button(self, parent, text, command, primary=False, quiet=False):
-        style = 'Primary.TButton' if primary else 'Quiet.TButton' if quiet else 'TButton'
+    def _button(self, parent, text, command, primary=False, quiet=False, stop=False):
+        style = 'Primary.TButton' if primary else 'Stop.TButton' if stop else 'Quiet.TButton' if quiet else 'TButton'
         return ttk.Button(parent, text=text, command=command, style=style, cursor='hand2')
 
+    def _dot(self, parent, color=MUTED, size=10):
+        dot = tk.Canvas(parent, width=size, height=size, background=parent.cget('background'),
+                        highlightthickness=0, borderwidth=0)
+        dot.create_oval(1, 1, size - 1, size - 1, fill=color, outline=color, tags='dot')
+        return dot
+
+    @staticmethod
+    def _recolor(dot, color):
+        dot.itemconfigure('dot', fill=color, outline=color)
+
+    # ── chrome ────────────────────────────────────────────────────────────
     def _sidebar(self):
-        sidebar = tk.Frame(self.root, background=SIDEBAR, width=224)
+        sidebar = tk.Frame(self.root, background=SIDEBAR, width=232)
         sidebar.grid(row=0, column=0, rowspan=2, sticky='nsew')
         sidebar.grid_propagate(False)
         sidebar.columnconfigure(0, weight=1)
         sidebar.rowconfigure(2, weight=1)
         brand = tk.Frame(sidebar, background=SIDEBAR)
-        brand.grid(row=0, column=0, sticky='ew', padx=23, pady=(30, 35))
-        self.brand_icon = tk.PhotoImage(data=base64.b64encode(icon_png(44)))
-        tk.Label(brand, image=self.brand_icon, background=SIDEBAR).pack(anchor='w', pady=(0, 14))
-        self._label(brand, 'Live Widget', size=19, bold=True).pack(anchor='w')
-        self._label(brand, 'YOUR STREAM COMPANION', color=MUTED, size=8).pack(anchor='w', pady=(5, 0))
+        brand.grid(row=0, column=0, sticky='ew', padx=22, pady=(26, 28))
+        self.brand_icon = tk.PhotoImage(data=base64.b64encode(icon_png(40)))
+        row = tk.Frame(brand, background=SIDEBAR)
+        row.pack(anchor='w', fill='x')
+        tk.Label(row, image=self.brand_icon, background=SIDEBAR).pack(side='left')
+        names = tk.Frame(row, background=SIDEBAR)
+        names.pack(side='left', padx=(12, 0))
+        self._label(names, 'Live Widget', size=15, bold=True, display=True).pack(anchor='w')
+        self._label(names, 'Stream companion', color=MUTED, size=9).pack(anchor='w')
         navigation = tk.Frame(sidebar, background=SIDEBAR)
-        navigation.grid(row=1, column=0, sticky='ew', padx=14)
-        for name, (number, title, heading, description) in PAGES.items():
-            button = tk.Button(navigation, text=f'{number}   {title}', anchor='w', command=lambda page=name: self.show_page(page),
-                               font=('Segoe UI', 10, 'bold'), padx=13, pady=13, relief='flat', borderwidth=0,
-                               background=SIDEBAR, foreground=MUTED, activebackground='#20312f', activeforeground=ACCENT,
+        navigation.grid(row=1, column=0, sticky='ew', padx=12)
+        for name, (title, heading, description) in PAGES.items():
+            item = tk.Frame(navigation, background=SIDEBAR)
+            item.pack(fill='x', pady=2)
+            indicator = tk.Frame(item, background=SIDEBAR, width=3)
+            indicator.pack(side='left', fill='y')
+            button = tk.Button(item, text=title, anchor='w', command=lambda page=name: self.show_page(page),
+                               font=self._font(bold=True), padx=13, pady=11, relief='flat', borderwidth=0,
+                               background=SIDEBAR, foreground=MUTED, activebackground='#1a1c2e', activeforeground=TEXT,
                                highlightthickness=1, highlightbackground=SIDEBAR, highlightcolor=ACCENT, cursor='hand2')
-            button.pack(fill='x', pady=3)
+            button.pack(side='left', fill='x', expand=True)
             self.nav_buttons[name] = button
+            self.nav_indicators[name] = (item, indicator)
         bottom = tk.Frame(sidebar, background=SIDEBAR)
-        bottom.grid(row=3, column=0, sticky='ew', padx=23, pady=24)
-        self.sidebar_plan = tk.Frame(bottom, background=SIDEBAR)
-        self.sidebar_plan.pack(fill='x')
-        self._label(self.sidebar_plan, 'SESSION PLAN', color=MUTED, size=8, bold=True).pack(anchor='w')
-        self._label(self.sidebar_plan, variable=self.mode_text, size=11, bold=True).pack(anchor='w', pady=(8, 2))
-        self._label(self.sidebar_plan, variable=self.destination_text, color=MUTED, size=9).pack(anchor='w')
-        self.sidebar_rule = tk.Frame(bottom, height=1, background=BORDER)
-        self.sidebar_rule.pack(fill='x', pady=17)
-        self._label(bottom, 'PRIVATE BY DEFAULT', color=ACCENT, size=8, bold=True).pack(anchor='w')
-        self._label(bottom, 'Your keys stay on this PC.', color=MUTED, size=9).pack(anchor='w', pady=(6, 15))
-        self.data_folder_button = self._button(
-            bottom, 'Logs & settings folder', self.app.open_data_folder, quiet=True,
-        )
-        self.data_folder_button.pack(fill='x')
+        bottom.grid(row=3, column=0, sticky='ew', padx=22, pady=22)
+        self.session_pill = tk.Frame(bottom, background=SURFACE_2, padx=12, pady=9,
+                                     highlightthickness=1, highlightbackground=BORDER)
+        self.session_pill.pack(fill='x')
+        self.session_dot = self._dot(self.session_pill, MUTED)
+        self.session_dot.pack(side='left')
+        self._label(self.session_pill, variable=self.session_text, size=10, bold=True).pack(side='left', padx=(9, 0))
+        self.data_folder_button = self._button(bottom, 'Logs & settings folder', self.app.open_data_folder, quiet=True)
+        self.data_folder_button.pack(fill='x', pady=(12, 0))
 
     def _workspace(self):
         workspace = tk.Frame(self.root, background=BACKGROUND)
         workspace.grid(row=0, column=1, sticky='nsew')
         heading = tk.Frame(workspace, background=BACKGROUND)
-        heading.pack(fill='x', padx=30, pady=(27, 18))
-        self.badge = tk.Label(heading, text='  NOT RUNNING  ', font=('Segoe UI', 8, 'bold'), padx=10, pady=8,
-                              background='#202d3d', foreground=MUTED)
-        self.badge.pack(side='right', anchor='n', pady=(4, 0))
-        self.eyebrow = self._label(heading, '', color=ACCENT, size=9, bold=True)
-        self.eyebrow.pack(anchor='w')
-        self.heading = self._label(heading, '', size=25, bold=True)
-        self.heading.pack(anchor='w', pady=(10, 7))
+        heading.pack(fill='x', padx=30, pady=(28, 16))
+        self.heading = self._label(heading, '', size=22, bold=True, display=True)
+        self.heading.pack(anchor='w')
         self.description = self._paragraph(heading)
         self.notice_frame = tk.Frame(workspace, background=ACCENT_DARK, padx=13, pady=10)
         self.notice = self._label(self.notice_frame, color=ACCENT)
@@ -217,7 +363,7 @@ class LauncherView:
         border.pack(fill='x', pady=(0, 14))
         body = tk.Frame(border, background=SURFACE, padx=21, pady=19)
         body.pack(fill='both', expand=True)
-        self._label(body, title, size=13, bold=True).pack(anchor='w')
+        self._label(body, title, size=12, bold=True, display=True).pack(anchor='w')
         if caption:
             self._paragraph(body, caption)
         return body
@@ -240,7 +386,7 @@ class LauncherView:
             toggle.pack(side='left', padx=(8, 0))
             self.secrets.append((entry, toggle))
         if hint:
-            self._paragraph(group, hint)
+            self._paragraph(group, hint, size=9)
         return group
 
     def _choices(self, parent, name, choices):
@@ -254,11 +400,76 @@ class LauncherView:
             self.controls.append((choice, 'normal'))
         return row
 
-    def _check(self, parent, title, name):
-        check = ttk.Checkbutton(parent, text=title, variable=self.app.variables[name], cursor='hand2')
-        check.pack(anchor='w', pady=(12, 0))
-        self.controls.append((check, 'normal'))
-        return check
+    def _switch(self, parent, title, name, hint=''):
+        row = tk.Frame(parent, background=parent.cget('background'))
+        row.pack(fill='x', pady=(14, 0))
+        switch = Switch(row, self.app.variables[name], background=row.cget('background'))
+        switch.pack(side='left')
+        label = self._label(row, title)
+        label.pack(side='left', padx=(12, 0))
+        label.configure(cursor='hand2')
+        label.bind('<Button-1>', lambda event: switch.toggle())
+        self.controls.append((switch, 'normal'))
+        if hint:
+            self._paragraph(parent, hint, size=9)
+        return switch
+
+    _check = _switch
+
+    def _link_row(self, parent, name, background=SURFACE):
+        row = tk.Frame(parent, background=background)
+        row.pack(fill='x')
+        entry = ttk.Entry(row, textvariable=self.app.urls[name], state='readonly')
+        entry.pack(side='left', fill='x', expand=True)
+        entry.bind('<FocusIn>', lambda event, control=entry: self.ensure_visible(control), add='+')
+        for title, command in (
+            ('Copy', lambda label=name: self.app.copy(self.app.urls[label].get(), label + ' link')),
+            ('Open', lambda label=name: self.app.open_url(self.app.urls[label].get())),
+        ):
+            button = self._button(row, title, command, quiet=True)
+            button.configure(width=6, state='disabled')
+            button.pack(side='left', padx=(8, 0))
+            self.app.link_buttons.append(button)
+        return row
+
+    # ── pages ─────────────────────────────────────────────────────────────
+    def _home_page(self):
+        page = self.pages['home']
+        session = self._card(page, 'Your session')
+        headline = tk.Frame(session, background=SURFACE)
+        headline.pack(fill='x', pady=(12, 0))
+        self.session_headline_dot = self._dot(headline, MUTED, size=12)
+        self.session_headline_dot.pack(side='left', pady=(4, 0))
+        self.session_headline = self._label(headline, 'Not running', size=16, bold=True, display=True)
+        self.session_headline.pack(side='left', padx=(10, 0))
+        self._paragraph(session, variable=self.session_detail)
+        self._paragraph(session, variable=self.app.status, size=9)
+        self.home_action = self._button(session, 'Start preview', self._home_action_clicked, primary=True)
+        self.home_action.pack(anchor='w', pady=(16, 0))
+        self.home_links = tk.Frame(session, background=SURFACE)
+        for name in LINK_NAMES:
+            self._label(self.home_links, name.upper(), color=MUTED, size=8, bold=True).pack(anchor='w', pady=(14, 6))
+            self._link_row(self.home_links, name)
+
+        checklist = self._card(page, 'Set-up checklist', 'Everything here can be changed later. Preview works with nothing configured.')
+        rows = (('source', 'Chat source', 'setup'), ('destination', 'Overlay destination', 'setup'),
+                ('spotify', 'Spotify', 'connections'))
+        for key, title, target in rows:
+            row = tk.Frame(checklist, background=SURFACE)
+            row.pack(fill='x', pady=(14, 0))
+            dot = self._dot(row, MUTED)
+            dot.pack(side='left', pady=(5, 0))
+            self.checklist_dots[key] = dot
+            text = tk.Frame(row, background=SURFACE)
+            text.pack(side='left', fill='x', expand=True, padx=(10, 12))
+            self._label(text, title, size=10, bold=True).pack(anchor='w')
+            self._label(text, variable=self.checklist_details[key], color=MUTED, size=9).pack(anchor='w', pady=(2, 0))
+            self._button(row, 'Go to', lambda target=target: self.show_page(target), quiet=True).pack(side='right')
+
+        tips = self._card(page, 'Adding overlays to OBS or TikTok Studio')
+        self._paragraph(tips, '1. Start the widget, then open Overlay links.\n'
+                              '2. In OBS add a Browser source and paste a link. Use Public HTTPS for TikTok Studio.\n'
+                              '3. Keep the control panel in your own browser and off-stream.')
 
     def _setup_page(self):
         page = self.pages['setup']
@@ -266,22 +477,22 @@ class LauncherView:
         self.setup_side = tk.Frame(page, background=BACKGROUND)
         self.setup_main.grid(row=0, column=0, sticky='new')
         self.setup_side.grid(row=1, column=0, sticky='new')
-        source = self._card(self.setup_main, '01  Choose your chat source', 'Start in Preview to try your overlays without connecting a live account.')
+        source = self._card(self.setup_main, 'Chat source', 'Start in Preview to try your overlays without connecting a live account.')
         self._choices(source, 'CHAT_SOURCE', (('preview', 'Preview\nTry it locally'), ('tiktok', 'TikTok\nLive chat'),
                                               ('twitch', 'Twitch\nLive chat'), ('both', 'Both\nOne widget')))
         self.channel_hint = self._paragraph(source, '')
         self.channel_hint.pack_configure(pady=(15, 0))
         self.tiktok_field = self._field(source, 'TikTok username', 'TIKTOK_USER', 'Your handle, with or without @.')
         self.twitch_field = self._field(source, 'Twitch channel', 'TWITCH_CHANNEL', 'The channel you stream to, not its URL.')
-        delivery = self._card(self.setup_main, '02  Overlay destination')
+        delivery = self._card(self.setup_main, 'Overlay destination')
         self._choices(delivery, 'PUBLIC_TUNNEL', ((False, 'Local / OBS\nOnly this computer'), (True, 'Public HTTPS\nTikTok Studio')))
         self.delivery_hint = self._paragraph(delivery)
         self.delivery_hint.pack_configure(pady=(14, 0))
-        controls = self._card(self.setup_side, '03  Private controls', 'Your generated password unlocks the control panel. It is never part of an overlay link.')
+        controls = self._card(self.setup_side, 'Private controls', 'Your generated password unlocks the control panel. It is never part of an overlay link.')
         self._field(controls, 'Control panel password', 'CONTROL_PASSWORD', secret=True)
         self._button(controls, 'Copy control password', lambda: self.app.copy(self.app.variables['CONTROL_PASSWORD'].get(), 'Control password'), quiet=True).pack(anchor='w', pady=(13, 0))
-        next_steps = self._card(self.setup_side, 'Once you start')
-        self._paragraph(next_steps, '1. Open your control panel.\n2. Copy an overlay link.\n3. Add a browser source.')
+        next_steps = self._card(self.setup_side, 'What happens next')
+        self._paragraph(next_steps, '1. Start the widget from the footer or Home.\n2. Copy an overlay link.\n3. Add it as a browser source.')
         self._button(next_steps, 'View overlay links', lambda: self.show_page('overlays'), quiet=True).pack(anchor='w', pady=(14, 0))
 
     def _overlays_page(self):
@@ -290,10 +501,11 @@ class LauncherView:
         intro.pack(fill='x', pady=(0, 17))
         self._paragraph(intro, variable=self.link_summary, color=ACCENT)
         self.link_kinds = {}
+        self.link_hints = {}
         captions = {
-            'Skip overlay': 'Show your audience the current skip vote and song request activity.',
-            'Queue overlay': 'Display the upcoming songs as a separate browser source.',
-            'Control panel': 'Private workspace. Never add this page to your broadcast.',
+            'Skip overlay': 'Show your audience the skip vote and, if enabled, the song request list.',
+            'Queue overlay': 'Now playing and up next, with album art, as a separate browser source.',
+            'Control panel': 'Private workspace for you and your moderators.',
         }
         for name, caption in captions.items():
             card = self._card(page, name, caption)
@@ -301,19 +513,8 @@ class LauncherView:
                                color=MUTED if name != 'Control panel' else AMBER, size=8, bold=True)
             kind.pack(anchor='w', pady=(12, 6))
             self.link_kinds[name] = kind
-            row = tk.Frame(card, background=SURFACE)
-            row.pack(fill='x')
-            entry = ttk.Entry(row, textvariable=self.app.urls[name], state='readonly')
-            entry.pack(side='left', fill='x', expand=True)
-            entry.bind('<FocusIn>', lambda event, control=entry: self.ensure_visible(control), add='+')
-            for title, command in (
-                ('Copy', lambda label=name: self.app.copy(self.app.urls[label].get(), label + ' link')),
-                ('Open', lambda label=name: self.app.open_url(self.app.urls[label].get())),
-            ):
-                button = self._button(row, title, command, quiet=True)
-                button.configure(width=6, state='disabled')
-                button.pack(side='left', padx=(8, 0))
-                self.app.link_buttons.append(button)
+            self._link_row(card, name)
+            self.link_hints[name] = self._paragraph(card, LINK_HINTS[name], size=9)
             if name == 'Control panel':
                 self._button(card, 'Copy control password', lambda: self.app.copy(self.app.variables['CONTROL_PASSWORD'].get(), 'Control password'), quiet=True).pack(anchor='w', pady=(12, 0))
 
@@ -355,12 +556,12 @@ class LauncherView:
     def _preferences_page(self):
         page = self.pages['preferences']
         voting = self._card(page, 'Voting & moderation', 'Control how your audience requests songs and votes to skip.')
-        self._check(voting, 'Adapt the skip threshold automatically', 'ADAPTIVE_SKIP_THRESHOLD_ENABLED')
+        self._switch(voting, 'Adapt the skip threshold to chat activity', 'ADAPTIVE_SKIP_THRESHOLD_ENABLED')
         self._field(voting, 'Fixed skip vote threshold', 'SKIP_THRESHOLD',
                     'Used only when automatic adaptation is off.', page='preferences')
         self._field(voting, 'Moderator IDs', 'MOD_LIST', 'Comma-separated IDs, not display names.', page='preferences')
         startup = self._card(page, 'Startup & local server')
-        self._check(startup, 'Open the control panel in my browser after starting', 'AUTO_OPEN')
+        self._switch(startup, 'Open the control panel in my browser after starting', 'AUTO_OPEN')
         self._field(startup, 'Local port', 'PORT', 'Default: 5000. Choose another port if a different app is using it.', page='preferences')
         storage = self._card(page, 'Your workspace', 'Settings, logs, and queue state live outside the EXE, so replacing the app keeps your setup.')
         self._paragraph(storage, str(self.app.directory))
@@ -373,13 +574,12 @@ class LauncherView:
         self.progress = ttk.Progressbar(footer, mode='indeterminate', style='Session.Horizontal.TProgressbar')
         body = tk.Frame(footer, background=SIDEBAR, padx=24, pady=17)
         body.pack(fill='x')
-        actions = tk.Frame(body, background=SIDEBAR)
-        actions.pack(side='right', padx=(16, 0))
-        self.app.save_button = self._button(actions, 'Save settings', self.app.save, quiet=True)
+        self.footer_actions = tk.Frame(body, background=SIDEBAR)
+        self.footer_actions.pack(side='right', padx=(16, 0))
+        self.app.save_button = self._button(self.footer_actions, 'Save settings', self.app.save, quiet=True)
         self.app.save_button.pack(side='left', padx=(0, 8))
-        self.app.stop_button = self._button(actions, 'Stop', self.app.stop, quiet=True)
-        self.app.stop_button.pack(side='left', padx=(0, 8))
-        self.app.start_button = self._button(actions, 'Start preview', self.app.start, primary=True)
+        self.app.stop_button = self._button(self.footer_actions, 'Stop', self.app.stop, stop=True)
+        self.app.start_button = self._button(self.footer_actions, 'Start preview', self.app.start, primary=True)
         self.app.start_button.pack(side='left')
         status = tk.Frame(body, background=SIDEBAR)
         status.pack(side='left', fill='both', expand=True)
@@ -389,30 +589,39 @@ class LauncherView:
         self.saved_label = self._label(status, variable=self.saved_text, color=MUTED, size=8)
         self.saved_label.pack(anchor='w', pady=(6, 0))
 
+    # ── state ─────────────────────────────────────────────────────────────
     def show_page(self, name):
         if name not in self.pages:
             return
         self.page = name
         for page_name, page in self.pages.items():
-            if page_name == name:
+            selected = page_name == name
+            if selected:
                 page.grid(row=0, column=0, sticky='ew')
             else:
                 page.grid_remove()
-            selected = page_name == name
+            item, indicator = self.nav_indicators[page_name]
+            item.configure(background=ACCENT_DARK if selected else SIDEBAR)
+            indicator.configure(background=ACCENT if selected else SIDEBAR)
             self.nav_buttons[page_name].configure(background=ACCENT_DARK if selected else SIDEBAR,
-                                                  foreground=ACCENT if selected else MUTED)
-        number, title, heading, description = PAGES[name]
-        self.eyebrow.configure(text=f'WORKSPACE  /  {number}  {title.upper()}')
+                                                  foreground=TEXT if selected else MUTED,
+                                                  highlightbackground=ACCENT_DARK if selected else SIDEBAR)
+        title, heading, description = PAGES[name]
         self.heading.configure(text=heading)
         self.description.configure(text=description)
         self.canvas.yview_moveto(0)
         self.mask_secrets()
 
+    def _source_label(self, source):
+        return {'preview': 'Preview session', 'tiktok': 'TikTok chat', 'twitch': 'Twitch chat', 'both': 'TikTok + Twitch'}.get(source, 'Choose a source')
+
     def refresh_settings(self):
-        source = self.app.variables['CHAT_SOURCE'].get()
-        self.mode_text.set({'preview': 'Preview session', 'tiktok': 'TikTok chat', 'twitch': 'Twitch chat', 'both': 'TikTok + Twitch'}.get(source, 'Choose a source'))
-        public = self.app.variables['PUBLIC_TUNNEL'].get()
+        variables = self.app.variables
+        source = variables['CHAT_SOURCE'].get()
+        self.mode_text.set(self._source_label(source))
+        public = variables['PUBLIC_TUNNEL'].get()
         self.destination_text.set('Public HTTPS overlays' if public else 'Local overlays / OBS')
+        self.session_detail.set(f'{self.mode_text.get()}  ·  {self.destination_text.get()}')
         self.delivery_hint.configure(
             text='Creates an internet-accessible link through Cloudflare. Keep your control password private.' if public
             else 'No tunnel needed. Your overlays are available only on this computer.')
@@ -425,16 +634,37 @@ class LauncherView:
                 group.pack_forget()
         for entry in self.fields.values():
             entry.state(['!invalid'])
-        self.fields['SKIP_THRESHOLD'].configure(state='disabled' if self.locked or self.app.variables['ADAPTIVE_SKIP_THRESHOLD_ENABLED'].get() else 'normal')
-        configured = all(self.app.variables[name].get().strip() for name in ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'))
+        self.fields['SKIP_THRESHOLD'].configure(state='disabled' if self.locked or variables['ADAPTIVE_SKIP_THRESHOLD_ENABLED'].get() else 'normal')
+        configured = all(variables[name].get().strip() for name in ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'))
         self.spotify_badge.set('CREDENTIALS ENTERED' if configured else 'OPTIONAL / NOT CONFIGURED')
+        self._refresh_checklist(source, public, configured)
         if not self.app.running and not self.app.busy and self.app.process.server is None:
-            self.app.start_button.configure(text='Start preview' if source == 'preview' else 'Start widget')
+            text = 'Start preview' if source == 'preview' else 'Start widget'
+            self.app.start_button.configure(text=text)
+            self.home_action.configure(text=text)
             self.app.status.set('Preview needs no accounts. Your controls stay private.' if source == 'preview'
                                 else 'Start your widget, then go live on your selected channel.')
         dirty = self.app.values() != self.app.saved_settings
         self.saved_text.set('Unsaved changes  /  Ctrl+S to save' if dirty else 'Settings stay on this PC')
         self.saved_label.configure(foreground=AMBER if dirty else MUTED)
+
+    def _refresh_checklist(self, source, public, spotify_configured):
+        variables = self.app.variables
+        accounts = []
+        if source in ('tiktok', 'both'):
+            handle = variables['TIKTOK_USER'].get().strip().lstrip('@')
+            accounts.append('@' + handle if handle else 'TikTok username missing')
+        if source in ('twitch', 'both'):
+            channel = variables['TWITCH_CHANNEL'].get().strip().lstrip('#')
+            accounts.append('#' + channel if channel else 'Twitch channel missing')
+        missing = any('missing' in item for item in accounts)
+        detail = self._source_label(source) + ('  ·  ' + ', '.join(accounts) if accounts else '  ·  no account needed')
+        self.checklist_details['source'].set(detail)
+        self._recolor(self.checklist_dots['source'], AMBER if missing else SUCCESS)
+        self.checklist_details['destination'].set('Public HTTPS via Cloudflare for TikTok Studio' if public else 'Local overlays for OBS on this computer')
+        self._recolor(self.checklist_dots['destination'], SUCCESS)
+        self.checklist_details['spotify'].set('Connected with your own developer app' if spotify_configured else 'Optional  ·  not connected')
+        self._recolor(self.checklist_dots['spotify'], SUCCESS if spotify_configured else MUTED)
 
     def set_active(self, active):
         self.locked = active
@@ -444,24 +674,52 @@ class LauncherView:
             button.configure(state='disabled' if active else 'normal')
         self.app.stop_button.configure(state='normal' if self.app.process.server is not None and not self.app.busy else 'disabled')
         self.refresh_settings()
+        self._sync_home_action()
 
     def set_session(self, state):
         self.session_state = state
-        titles = {'stopped': ('NOT RUNNING', 'Ready to start', MUTED),
-                  'starting': ('STARTING', 'Getting your widget ready', AMBER),
-                  'running': ('PREVIEW' if self.app.variables['CHAT_SOURCE'].get() == 'preview' else 'RUNNING', 'Widget server running', ACCENT),
-                  'stopping': ('STOPPING', 'Closing your session', AMBER)}
-        badge, title, color = titles[state]
-        self.badge.configure(text=f'  {badge}  ', foreground=color,
-                             background=ACCENT_DARK if state == 'running' else '#202d3d')
+        pill, color, title = SESSION_STATES[state]
+        if state == 'running':
+            pill = 'Running  ·  ' + ('Preview' if self.app.variables['CHAT_SOURCE'].get() == 'preview' else 'Live')
+        self.session_text.set(pill)
+        self._recolor(self.session_dot, color)
+        self._recolor(self.session_headline_dot, color)
+        self.session_pill.configure(background=SUCCESS_DARK if state == 'running' else SURFACE_2,
+                                    highlightbackground=SUCCESS if state == 'running' else BORDER)
+        for child in self.session_pill.winfo_children():
+            child.configure(background=self.session_pill.cget('background'))
+        self.session_headline.configure(text=pill, foreground=color if state != 'stopped' else TEXT)
         self.session_title.configure(text=title, foreground=color if state != 'stopped' else TEXT)
         self.progress.stop()
         self.progress.pack_forget()
         if state in ('starting', 'stopping'):
             self.progress.pack(fill='x', side='top', before=self.progress.master.winfo_children()[1])
             self.progress.start(15)
-        self.app.start_button.configure(text='Starting...' if state == 'starting' else 'Widget running' if state == 'running'
-                                         else 'Start preview' if self.app.variables['CHAT_SOURCE'].get() == 'preview' else 'Start widget')
+        source_text = 'Start preview' if self.app.variables['CHAT_SOURCE'].get() == 'preview' else 'Start widget'
+        self.app.start_button.configure(text='Starting...' if state == 'starting' else source_text)
+        self.app.stop_button.configure(text='Stopping...' if state == 'stopping' else 'Stop')
+        show_stop = state in ('running', 'stopping')
+        if show_stop:
+            self.app.start_button.pack_forget()
+            if not self.app.stop_button.winfo_manager():
+                self.app.stop_button.pack(side='left')
+        else:
+            self.app.stop_button.pack_forget()
+            if not self.app.start_button.winfo_manager():
+                self.app.start_button.pack(side='left')
+        self._sync_home_action()
+
+    def _sync_home_action(self):
+        show_stop = self.session_state in ('running', 'stopping')
+        source_button = self.app.stop_button if show_stop else self.app.start_button
+        self.home_action.configure(text=str(source_button.cget('text')), style='Stop.TButton' if show_stop else 'Primary.TButton',
+                                   state='disabled' if source_button.instate(['disabled']) else 'normal')
+
+    def _home_action_clicked(self):
+        if self.session_state in ('running', 'stopping'):
+            self.app.stop()
+        else:
+            self.app.start()
 
     def links_ready(self, ready, public=False):
         for button in self.app.link_buttons:
@@ -470,7 +728,11 @@ class LauncherView:
                               else 'Start the widget to generate your overlay links.')
         for name in ('Skip overlay', 'Queue overlay'):
             self.link_kinds[name].configure(text=('PUBLIC HTTPS' if public else 'LOCAL / THIS COMPUTER') if ready else 'AVAILABLE AFTER START',
-                                            foreground=ACCENT if ready else MUTED)
+                                            foreground=SUCCESS if ready else MUTED)
+        if ready:
+            self.home_links.pack(fill='x', pady=(4, 0))
+        else:
+            self.home_links.pack_forget()
 
     def oauth_pending(self, pending):
         self.cancel_button.configure(state='normal' if pending else 'disabled')
@@ -504,9 +766,9 @@ class LauncherView:
         if self.notice_after:
             self.root.after_cancel(self.notice_after)
             self.notice_after = None
-        background = '#3a242e' if error else ACCENT_DARK
+        background = ERROR_DARK if error else ACCENT_DARK
         self.notice_frame.configure(background=background)
-        self.notice.configure(text=text, background=background, foreground=ERROR if error else ACCENT)
+        self.notice.configure(text=text, background=background, foreground=ERROR if error else TEXT)
         self.notice_frame.pack(fill='x', padx=30, pady=(0, 13), before=self.scroller)
         if not error:
             self.notice_after = self.root.after(5000, self.clear_notice)
@@ -537,6 +799,7 @@ class LauncherView:
             self.scroll_after = self.root.after_idle(lambda: self.ensure_visible(entry))
         self.notify(text, error=True)
 
+    # ── scrolling & layout ────────────────────────────────────────────────
     def ensure_visible(self, control):
         self.scroll_after = None
         if not control.winfo_ismapped():
@@ -575,13 +838,6 @@ class LauncherView:
         page.columnconfigure(1, weight=1 if wide else 0, minsize=270 if wide else 0, uniform='setup' if wide else '')
         self.setup_main.grid_configure(row=0, column=0, padx=(0, 14 if wide else 0))
         self.setup_side.grid_configure(row=0 if wide else 1, column=1 if wide else 0)
-
-    def _resize_root(self, event):
-        if event.widget is self.root:
-            if event.height < 730:
-                self.sidebar_plan.pack_forget()
-            else:
-                self.sidebar_plan.pack(fill='x', before=self.sidebar_rule)
 
     def _shortcut(self, action):
         if not self.locked:

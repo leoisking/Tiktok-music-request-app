@@ -6,8 +6,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import desktop_launcher as launcher
-from desktop_branding import icon_png, write_windows_icon
-from desktop_ui import initial_window_geometry
+from desktop_branding import build_icon_bytes, icon_png, write_windows_icon
+from desktop_ui import Switch, initial_window_geometry
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows launcher interface')
@@ -195,6 +195,62 @@ class DesktopInterfaceTests(unittest.TestCase):
         write_windows_icon(path)
         source = Path(__file__).resolve().parents[1] / 'LiveWidget.ico'
         self.assertEqual(path.read_bytes(), source.read_bytes())
+
+    def test_checked_in_icon_matches_the_violet_generator(self):
+        icon = build_icon_bytes()
+        self.assertTrue(icon.startswith(b'\x00\x00\x01\x00\x05\x00'))
+        self.assertEqual((Path(__file__).resolve().parents[1] / 'LiveWidget.ico').read_bytes(), icon)
+        # The waveform bars use the overlays' violet accent.
+        from desktop_branding import ACCENT_RGB
+        self.assertEqual(ACCENT_RGB, (139, 124, 255))
+
+    def test_home_is_the_landing_page_with_a_session_summary(self):
+        self.assertEqual(self.app.view.page, 'home')
+        self.assertIn('Not running', self.app.view.session_text.get())
+        self.assertIn('Preview', self.app.view.session_detail.get())
+        self.app.view.set_session('running')
+        self.assertIn('Running', self.app.view.session_text.get())
+
+    def test_footer_shows_start_or_stop_depending_on_session(self):
+        self.assertTrue(self.app.start_button.winfo_manager())
+        self.assertFalse(self.app.stop_button.winfo_manager())
+        self.app.view.set_session('running')
+        self.assertFalse(self.app.start_button.winfo_manager())
+        self.assertTrue(self.app.stop_button.winfo_manager())
+        self.assertEqual(str(self.app.stop_button.cget('text')), 'Stop')
+        self.app.view.set_session('stopping')
+        self.assertEqual(str(self.app.stop_button.cget('text')), 'Stopping...')
+        self.app.view.set_session('stopped')
+        self.assertTrue(self.app.start_button.winfo_manager())
+        self.assertFalse(self.app.stop_button.winfo_manager())
+
+    def test_switch_respects_disabled_state(self):
+        variable = tk.BooleanVar(master=self.root, value=False)
+        switch = Switch(self.root, variable)
+        switch.toggle()
+        self.assertTrue(variable.get())
+        switch.configure(state='disabled')
+        self.assertTrue(switch.instate(['disabled']))
+        switch.toggle()
+        self.assertTrue(variable.get(), 'a disabled switch must not change its value')
+        switch.configure(state='normal')
+        self.assertFalse(switch.instate(['disabled']))
+        switch.toggle()
+        self.assertFalse(variable.get())
+
+    def test_overlay_cards_explain_browser_source_sizes(self):
+        hints = self.app.view.link_hints
+        self.assertEqual(set(hints), {'Skip overlay', 'Queue overlay', 'Control panel'})
+        self.assertIn('420', hints['Skip overlay'].cget('text'))
+        self.assertIn('520', hints['Queue overlay'].cget('text'))
+        self.assertIn('Never', hints['Control panel'].cget('text'))
+
+    def test_home_links_follow_link_readiness(self):
+        self.app.process.settings = {'PORT': '6123'}
+        self.app.update_urls()
+        self.assertTrue(all(not button.instate(['disabled']) for button in self.app.link_buttons))
+        self.assertGreaterEqual(len(self.app.link_buttons), 12)
+        self.assertEqual(self.app.urls['Skip overlay'].get(), 'http://127.0.0.1:6123/')
 
 
 if __name__ == '__main__':

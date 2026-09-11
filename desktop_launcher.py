@@ -304,7 +304,7 @@ def self_test(output):
         os.environ.update({'ALLOWED_ORIGINS': '', 'CONTROL_PASSWORD': 'self-test-password-only'})
         import tkinter as tk
         import live_widget as widget
-        from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
 
         with tempfile.TemporaryDirectory(prefix='widget-gui-self-test-') as temporary:
             root = tk.Tk()
