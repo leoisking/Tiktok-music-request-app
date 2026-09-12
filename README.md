@@ -1,8 +1,34 @@
 # 🎵 Live Widget
 
-Live Widget is a real-time song-request and skip-voting overlay for TikTok Live and Twitch. It features transparent OBS/TikTok Studio overlays, a password-protected control panel, optional Spotify queue integration, and a standalone Windows launcher.
+Live Widget lets your viewers request songs and vote to skip while you stream on TikTok Live or Twitch. Spotify supplies the now-playing and playback queue, while separate browser-source overlays show your queue and skip meter on stream. A password-protected control panel and standalone Windows launcher keep the setup simple.
 
 > ⚠️ **Note:** If Windows shows a SmartScreen warning during setup, click *More info* → *Run anyway*. This is expected for unsigned open-source applications.
+
+## 🚀 Start here: the beginner setup
+
+The easiest option is the **Windows App** from the latest [GitHub Release](https://github.com/leoisking/Tiktok-music-request-app/releases). You do not need Python, Node.js, or Cloudflare installed when using the released ZIP.
+
+### What you will set up
+
+| Part | What it does |
+| :--- | :--- |
+| **Spotify connection** | Lets the app read what is playing and add viewer requests to the playback queue. |
+| **Queue overlay** | Shows the current song, album art, and upcoming requests in OBS or TikTok Studio. |
+| **Skip overlay** | Shows the community skip vote and request activity. |
+| **Control panel** | Private page for testing requests, clearing the queue, and managing votes. Never show it on stream. |
+
+### Recommended first session
+
+1. Download and extract `LiveWidget-Windows-x64.zip`. Open the extracted folder and launch `LiveWidget.exe`.
+2. Open **Connections** and click **Connect Spotify**. Approve access in your browser, then make sure Spotify is playing on the device you want to use.
+3. Open **Stream setup** and leave **Chat source** set to **Preview**. Click **Save settings**, then **Start preview**.
+4. Open **Overlay links**. Copy the **Queue overlay** URL into an OBS Browser source. Add the **Skip overlay** URL as a second Browser source.
+5. Open the private **Control panel** URL in your own browser and enter the generated control password.
+6. Use the control panel test area to send `!req Song Name by Artist`. Confirm the request appears in the queue overlay.
+7. Send `!skip` and confirm the skip meter changes. Adjust the vote threshold later under **Preferences**.
+8. When the preview works, stop it, select **TikTok**, **Twitch**, or **Both**, enter your channel name, and start the real session.
+
+**Important:** Spotify must be open with an active playback device. The queue overlay displays playback and requests; it does not replace Spotify or start music on its own. Keep the control panel URL and password private.
 
 ---
 
@@ -48,7 +74,7 @@ Live Widget is a real-time song-request and skip-voting overlay for TikTok Live 
 * **Smart Thresholds:** Uses adaptive or fixed skip thresholds to match your audience size.
 * **OBS Integration:** Dispatches separate, transparent skip and queue browser-source overlays.
 * **Moderator Control Panel:** Protected via standard dashboard authentication.
-* **Spotify Integration:** Optional automated playback handling and queue management.
+* **Spotify Integration:** Connect playback, show now-playing details, and manage viewer requests.
 * **TikTok Studio Compatibility:** Optional Cloudflare HTTPS tunnel integration.
 * **Secure Environment:** Packages a standalone Windows EXE with DPAPI-protected user data.
 
@@ -67,19 +93,19 @@ Live Widget is a real-time song-request and skip-voting overlay for TikTok Live 
 - **Windows app:** use a 64-bit Windows 10 or 11 computer. No Python installation is needed for a release ZIP.
 - **Run from source:** use 64-bit Python 3.14 or newer and PowerShell. Preview mode is the fastest way to verify the install.
 - **Streaming:** keep the launcher running for the whole stream. OBS browser sources use local URLs; TikTok Studio needs Public HTTPS.
-- **Spotify:** optional. Start with the request queue and overlays first, then connect Spotify once the basic flow works.
+- **Spotify:** recommended for the full experience. Preview mode can test the overlays without connecting it, but now-playing, playback queue, and viewer song requests require Spotify.
 
 ---
 
 ## <div id="toc-guides"></div>🚀 Quick Start Guides
 
 ### <div id="toc-win-start"></div>1. Windows App Quick Start
-1. Download a published `LiveWidget-Windows-x64.zip` package from the repository releases.
+1. Download a published `LiveWidget-Windows-x64.zip` package from the [repository releases](https://github.com/leoisking/Tiktok-music-request-app/releases).
 2. **Extract the ZIP file** before opening the app. *Do not run the EXE directly from inside a compressed folder.*
-3. Launch `LiveWidget.exe` and leave the chat source set to **Preview** for your first initialization test.
-4. Copy the freshly generated control password and click **Start preview**.
-5. Paste the password into the configuration panel that launches in your default browser.
-6. Open the **Overlay links** window and copy either the skip or queue URL into an OBS browser source.
+3. Launch `LiveWidget.exe`, open **Connections**, and click **Connect Spotify**. Approve access in your browser and start playback on the desired Spotify device.
+4. Leave the chat source set to **Preview** for your first initialization test, then click **Start preview**.
+5. Open **Overlay links** and add the **Queue overlay** and **Skip overlay** URLs as separate OBS Browser sources.
+6. Open the private control panel, copy the generated password from **Stream setup**, and use the test area to try `!req` and `!skip`.
 
 **First-run check:** open the skip overlay in a browser before adding it to your scene. You should see the compact vote meter and a connected status. Add the queue overlay as a second Browser source if you want now-playing and up-next information.
 
