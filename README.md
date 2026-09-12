@@ -22,7 +22,7 @@ The easiest option is the **Windows App** from the latest [GitHub Release](https
 1. Download and extract `LiveWidget-Windows-x64.zip`. Open the extracted folder and launch `LiveWidget.exe`.
 2. Open **Connections** and click **Connect Spotify**. Approve access in your browser, then make sure Spotify is playing on the device you want to use.
 3. Open **Stream setup** and leave **Chat source** set to **Preview**. Click **Save settings**, then **Start preview**.
-4. Open **Overlay links**. Copy the **Queue overlay** URL into an OBS Browser source. Add the **Skip overlay** URL as a second Browser source.
+4. Open **Overlay links**. Copy the **Queue overlay** URL into an OBS Browser source or a TikTok Live studio source. Add the **Skip overlay** URL as a second Browser source.
 5. Open the private **Control panel** URL in your own browser and enter the generated control password.
 6. Use the control panel test area to send `!req Song Name by Artist`. Confirm the request appears in the queue overlay.
 7. Send `!skip` and confirm the skip meter changes. Adjust the vote threshold later under **Preferences**.
