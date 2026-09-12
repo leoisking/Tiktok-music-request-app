@@ -17,8 +17,13 @@ from websockets.sync.client import connect
 def run(executable):
     with tempfile.TemporaryDirectory(prefix='Live Widget standalone test ') as temporary:
         directory = Path(temporary)
-        standalone = directory / 'LiveWidget.exe'
-        shutil.copy2(executable, standalone)
+        if executable.is_dir():
+            standalone_dir = directory / 'LiveWidget'
+            shutil.copytree(executable, standalone_dir)
+            standalone = standalone_dir / 'LiveWidget.exe'
+        else:
+            standalone = directory / 'LiveWidget.exe'
+            shutil.copy2(executable, standalone)
         report_path = directory / 'self-test.json'
         environment = os.environ.copy()
         for name in tuple(environment):

@@ -29,7 +29,9 @@ Use Tab to move between controls, Ctrl+S to save, and Ctrl+Enter to start when s
 
 ## Spotify (optional)
 
-Open Connections, enter credentials for **your own** Spotify developer app, and click `Connect Spotify`. Register `http://127.0.0.1:8888/callback` exactly as that app's redirect URI. The refresh token is filled in after you authorize. You can also paste an existing token with the necessary playback scopes under Advanced Spotify settings.
+For public-client builds, open Connections and click `Connect Spotify`. Spotify opens in your browser and the refresh token is stored securely after authorization; users do not need a developer console ID or secret. Before packaging, the app owner must set `BUNDLED_PUBLIC_CLIENT_ID` in `spotify_app_config.py` and register `http://127.0.0.1:8888/callback` exactly as that app's redirect URI. PKCE is used, so no client secret is bundled.
+
+Existing builds and self-hosted setups remain supported: when no public client ID is configured, enter credentials for **your own** Spotify developer app. You can also paste an existing token with the necessary playback scopes under Advanced Spotify settings.
 
 Start Spotify and choose an active playback device. Spotify playback API features require an eligible account and appropriate app access; development-mode apps have Spotify-imposed access limits. Packaging does not bypass those restrictions. This build does not share the author's developer credentials or provide a single shared Spotify app for all recipients.
 

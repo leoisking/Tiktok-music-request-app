@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -49,22 +50,39 @@ def _build_basic_auth(client_id, client_secret):
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-def _exchange_code_for_tokens(client_id, client_secret, code, redirect_uri):
+def create_pkce_pair():
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode('ascii')).digest()
+    ).rstrip(b'=').decode('ascii')
+    return verifier, challenge
+
+
+def _exchange_code_for_tokens(client_id, client_secret, code, redirect_uri, code_verifier=None):
     body = urllib.parse.urlencode(
         {
+            "client_id": client_id,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
         }
     ).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if code_verifier:
+        body = urllib.parse.urlencode({
+            "client_id": client_id,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }).encode("utf-8")
+    else:
+        headers["Authorization"] = _build_basic_auth(client_id, client_secret)
     req = urllib.request.Request(
         TOKEN_URL,
         data=body,
         method="POST",
-        headers={
-            "Authorization": _build_basic_auth(client_id, client_secret),
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=20, context=verifying_ssl_context()) as resp:

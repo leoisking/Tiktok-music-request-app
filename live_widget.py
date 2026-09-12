@@ -855,7 +855,7 @@ def _song_queue_payload_unlocked():
 
 
 def _spotify_auth_ready():
-    return bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and SPOTIFY_REFRESH_TOKEN)
+    return bool(SPOTIFY_CLIENT_ID and SPOTIFY_REFRESH_TOKEN)
 
 
 def _spotify_basic_auth_header():
@@ -870,16 +870,18 @@ def _spotify_refresh_access_token():
             "Spotify API credentials missing. Set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and SPOTIFY_REFRESH_TOKEN."
         )
 
-    body = urllib.parse.urlencode({
+    body_params = {
+        "client_id": SPOTIFY_CLIENT_ID,
         "grant_type": "refresh_token",
         "refresh_token": SPOTIFY_REFRESH_TOKEN
-    }).encode("utf-8")
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if SPOTIFY_CLIENT_SECRET:
+        headers["Authorization"] = _spotify_basic_auth_header()
+    body = urllib.parse.urlencode(body_params).encode("utf-8")
     status, raw = _spotify_http_request(
         "accounts.spotify.com", "POST", "/api/token", body=body,
-        headers={
-            "Authorization": _spotify_basic_auth_header(),
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
+        headers=headers
     )
     text = raw.decode("utf-8", errors="ignore")
     if status >= 400:

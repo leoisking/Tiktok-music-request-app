@@ -1,4 +1,6 @@
 import http.client
+import base64
+import hashlib
 import ssl
 import unittest
 import urllib.error
@@ -9,6 +11,12 @@ from spotify_oauth_helper import CallbackServer
 
 
 class TlsContextTests(unittest.TestCase):
+    def test_pkce_pair_is_s256_compatible(self):
+        verifier, challenge = helper.create_pkce_pair()
+        expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode('ascii')).digest()).rstrip(b'=').decode('ascii')
+        self.assertEqual(challenge, expected)
+        self.assertGreaterEqual(len(verifier), 43)
+
     def test_module_does_not_disable_global_certificate_verification(self):
         self.assertIsNot(ssl._create_default_https_context, ssl._create_unverified_context)
 
@@ -35,6 +43,23 @@ class TlsContextTests(unittest.TestCase):
         context = urlopen.call_args.kwargs['context']
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertFalse(context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_pkce_token_exchange_does_not_send_client_secret(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *arguments):
+                return False
+
+            def read(self):
+                return b'{"refresh_token": "token"}'
+
+        with patch.object(helper.urllib.request, 'urlopen', return_value=Response()) as urlopen:
+            helper._exchange_code_for_tokens('id', '', 'code', 'http://127.0.0.1:8888/callback', code_verifier='verifier')
+        request = urlopen.call_args.args[0]
+        self.assertNotIn('Authorization', request.headers)
+        self.assertIn(b'code_verifier=verifier', request.data)
 
     def test_certificate_failures_explain_network_inspection(self):
         error = urllib.error.URLError(ssl.SSLCertVerificationError('certificate verify failed: self-signed certificate'))

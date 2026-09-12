@@ -10,6 +10,7 @@ from tkinter import font as tkfont
 from tkinter import ttk
 
 from desktop_branding import icon_png
+from spotify_app_config import PUBLIC_CLIENT_ID
 
 
 BACKGROUND = '#0b0d12'
@@ -522,6 +523,10 @@ class LauncherView:
         page = self.pages['connections']
         spotify = self._card(page, 'Spotify', 'Let viewer requests join your playback queue. Preview mode never controls playback.')
         self._label(spotify, variable=self.spotify_badge, color=ACCENT, size=8, bold=True).pack(anchor='w', pady=(12, 0))
+        if PUBLIC_CLIENT_ID:
+            self._paragraph(spotify, 'Connect your Spotify account in one click. No developer credentials are required.')
+        else:
+            self._paragraph(spotify, 'Enter credentials for your own Spotify developer app, or configure a public app client ID before packaging.')
         instruction = tk.Frame(spotify, background=INPUT, padx=14, pady=12)
         instruction.pack(fill='x', pady=(14, 0))
         self._paragraph(instruction, '1. Open your developer app.  2. Register this redirect URI.  3. Connect below.')
@@ -531,8 +536,9 @@ class LauncherView:
         ttk.Entry(row, textvariable=self.redirect_uri, state='readonly').pack(side='left', fill='x', expand=True)
         self._button(row, 'Copy URI', lambda: self.app.copy(self.redirect_uri.get(), 'Redirect URI'), quiet=True).pack(side='left', padx=(8, 0))
         self._button(spotify, 'Open Spotify developer dashboard', lambda: self.app.open_url('https://developer.spotify.com/dashboard'), quiet=True).pack(anchor='w', pady=(13, 0))
-        self._field(spotify, 'Client ID', 'SPOTIFY_CLIENT_ID', page='connections')
-        self._field(spotify, 'Client secret', 'SPOTIFY_CLIENT_SECRET', secret=True, page='connections')
+        if not PUBLIC_CLIENT_ID:
+            self._field(spotify, 'Client ID', 'SPOTIFY_CLIENT_ID', page='connections')
+            self._field(spotify, 'Client secret', 'SPOTIFY_CLIENT_SECRET', secret=True, page='connections')
         actions = tk.Frame(spotify, background=SURFACE)
         actions.pack(fill='x', pady=(16, 0))
         self.app.connect_button = self._button(actions, 'Connect Spotify', self.app.connect_spotify, primary=True)
@@ -635,7 +641,9 @@ class LauncherView:
         for entry in self.fields.values():
             entry.state(['!invalid'])
         self.fields['SKIP_THRESHOLD'].configure(state='disabled' if self.locked or variables['ADAPTIVE_SKIP_THRESHOLD_ENABLED'].get() else 'normal')
-        configured = all(variables[name].get().strip() for name in ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'))
+        configured = bool(variables['SPOTIFY_REFRESH_TOKEN'].get().strip()) and (
+            bool(PUBLIC_CLIENT_ID) or all(variables[name].get().strip() for name in ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET'))
+        )
         self.spotify_badge.set('CREDENTIALS ENTERED' if configured else 'OPTIONAL / NOT CONFIGURED')
         self._refresh_checklist(source, public, configured)
         if not self.app.running and not self.app.busy and self.app.process.server is None:

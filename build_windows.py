@@ -75,27 +75,31 @@ def main():
     subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py'], cwd=ROOT, check=True)
     collect_notices(prepare_vendor())
     write_windows_icon(ROOT / 'build' / 'LiveWidget.ico')
-    subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', str(ROOT / 'LiveWidget.spec')], cwd=ROOT, check=True)
     output = ROOT / 'dist'
-    executable = output / 'LiveWidget.exe'
+    if output.exists():
+        shutil.rmtree(output)
+    subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', str(ROOT / 'LiveWidget.spec')], cwd=ROOT, check=True)
+    bundle = output / 'LiveWidget'
+    executable = bundle / 'LiveWidget.exe'
     report = ROOT / 'build' / 'exe-self-test.json'
     subprocess.run([str(executable), '--self-test', str(report)], cwd=ROOT / 'build', check=True, timeout=120)
     if not json.loads(report.read_text(encoding='utf-8')).get('ok'):
         raise RuntimeError(f'Executable smoke test failed. See {report}')
-    subprocess.run([sys.executable, str(ROOT / 'tests' / 'smoke_exe.py'), str(executable)], cwd=ROOT, check=True, timeout=180)
+    subprocess.run([sys.executable, str(ROOT / 'tests' / 'smoke_exe.py'), str(bundle)], cwd=ROOT, check=True, timeout=180)
     notify_windows_shell(executable)
-    shutil.copy2(ROOT / 'DISTRIBUTION.md', output / 'READ_ME_FIRST.txt')
-    shutil.copy2(ROOT / 'build' / 'THIRD_PARTY_LICENSES.txt', output / 'THIRD_PARTY_LICENSES.txt')
+    shutil.copy2(ROOT / 'DISTRIBUTION.md', bundle / 'READ_ME_FIRST.txt')
+    shutil.copy2(ROOT / 'build' / 'THIRD_PARTY_LICENSES.txt', bundle / 'THIRD_PARTY_LICENSES.txt')
     manifest = {
         'application': 'LiveWidget', 'platform': 'Windows x64', 'python': platform.python_version(),
         'cloudflared': CLOUDFLARED_VERSION, 'cloudflared_sha256': CLOUDFLARED_SHA256,
         'exe_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
         'packages': {package.metadata['Name']: package.version for package in metadata.distributions()},
     }
-    (output / 'build-info.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    (bundle / 'build-info.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     with zipfile.ZipFile(output / 'LiveWidget-Windows-x64.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in ('LiveWidget.exe', 'READ_ME_FIRST.txt', 'THIRD_PARTY_LICENSES.txt', 'build-info.json'):
-            archive.write(output / name, name)
+        for path in bundle.rglob('*'):
+            if path.is_file():
+                archive.write(path, Path('LiveWidget') / path.relative_to(bundle))
     print(f"Ready to share: {output / 'LiveWidget-Windows-x64.zip'}")
 
 

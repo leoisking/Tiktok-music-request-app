@@ -77,6 +77,15 @@ class DesktopSettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runtime.validate_settings({**self.settings, 'CHAT_SOURCE': 'twitch', 'TWITCH_CHANNEL': 'sample', 'SPOTIFY_CLIENT_ID': 'test'})
 
+    def test_public_spotify_configuration_allows_refresh_token_only(self):
+        settings = {**self.settings, 'CHAT_SOURCE': 'twitch', 'TWITCH_CHANNEL': 'sample',
+                    'SPOTIFY_REFRESH_TOKEN': 'refresh-token'}
+        with patch.object(runtime, 'PUBLIC_CLIENT_ID', 'public-client-id'):
+            result = runtime.validate_settings(settings)
+            environment = runtime.server_environment(result, self.directory)
+        self.assertEqual(environment['SPOTIFY_CLIENT_ID'], 'public-client-id')
+        self.assertEqual(environment['SPOTIFY_CLIENT_SECRET'], '')
+
     def test_environment_does_not_inherit_accounts_or_insecure_origin(self):
         with patch.dict(os.environ, {'SPOTIFY_REFRESH_TOKEN': 'do-not-use', 'TWITCH_OAUTH_TOKEN': 'do-not-use',
                                      'TIKTOK_USER': 'do-not-use', 'ALLOWED_ORIGINS': '*', 'HOST': '0.0.0.0'}):

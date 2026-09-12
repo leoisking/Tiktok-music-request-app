@@ -3,8 +3,8 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 root = Path(SPECPATH)
 datas = [(str(root / name), '.') for name in ('index.html', 'queue_widget.html')]
-datas += [(str(root / 'build' / 'THIRD_PARTY_LICENSES.txt'), '.')]
-binaries = [(str(root / 'build' / 'vendor' / 'cloudflared.exe'), '.')]
+binaries = []
+datas += [(str(root / 'build' / 'vendor' / 'cloudflared.exe'), '.')]
 hiddenimports = [
     'engineio.async_drivers.threading', 'engineio.async_drivers._websocket_wsgi',
     # Windows media session bridge (pywinrt). The package is a namespace package, so name the modules explicitly.
@@ -14,7 +14,8 @@ hiddenimports = [
 ]
 for package in ('TikTokLive', 'winrt'):
     package_data, package_binaries, package_imports = collect_all(package)
-    datas += package_data
+    if package != 'TikTokLive':
+        datas += package_data
     binaries += package_binaries
     hiddenimports += package_imports
 datas += copy_metadata('TikTokLive', recursive=True)
@@ -28,8 +29,13 @@ analysis = Analysis(
 )
 archive = PYZ(analysis.pure)
 executable = EXE(
-    archive, analysis.scripts, analysis.binaries, analysis.datas, [],
+    archive, analysis.scripts, [], [], [],
     name='LiveWidget', debug=False, bootloader_ignore_signals=False,
     strip=False, upx=False, console=False, disable_windowed_traceback=False,
+    exclude_binaries=True,
     icon=str(root / 'build' / 'LiveWidget.ico'),
+)
+bundle = COLLECT(
+    executable, analysis.binaries, analysis.datas,
+    strip=False, upx=False, name='LiveWidget',
 )

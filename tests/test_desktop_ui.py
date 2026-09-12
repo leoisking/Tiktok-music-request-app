@@ -142,6 +142,10 @@ class DesktopInterfaceTests(unittest.TestCase):
         start.assert_not_called()
 
     def test_missing_spotify_credentials_use_inline_validation(self):
+        if launcher.PUBLIC_CLIENT_ID:
+            self.assertNotIn('SPOTIFY_CLIENT_ID', self.app.view.fields)
+            self.assertNotIn('SPOTIFY_CLIENT_SECRET', self.app.view.fields)
+            return
         self.app.view.show_page('setup')
         self.app.connect_spotify()
         self.assertEqual(self.app.view.page, 'connections')

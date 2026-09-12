@@ -18,6 +18,7 @@ import traceback
 import urllib.request
 
 from _launch_overlay_tunnel import TUNNEL_URL_PATTERN, stop_tunnel
+from spotify_app_config import PUBLIC_CLIENT_ID
 
 
 SECRET_FIELDS = ('CONTROL_PASSWORD', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN', 'TWITCH_OAUTH_TOKEN')
@@ -127,7 +128,8 @@ def validate_settings(settings):
         raise ValueError('Use a unique control password with at least 12 characters.')
     credentials = [bool(settings[name].strip()) for name in
                    ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN')]
-    if source != 'preview' and any(credentials) and not all(credentials):
+    if source != 'preview' and any(credentials) and not all(credentials) and not (
+            PUBLIC_CLIENT_ID and credentials[2] and not credentials[0] and not credentials[1]):
         raise ValueError('Finish connecting Spotify, or clear all three Spotify credential fields.')
     return settings
 
@@ -144,6 +146,8 @@ def server_environment(settings, directory):
         'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8',
         'SPOTIFY_QUEUE_ON_REQUEST': '1' if settings['SPOTIFY_REFRESH_TOKEN'] else '0',
     })
+    if PUBLIC_CLIENT_ID and settings['SPOTIFY_REFRESH_TOKEN'] and not settings['SPOTIFY_CLIENT_ID']:
+        environment['SPOTIFY_CLIENT_ID'] = PUBLIC_CLIENT_ID
     return environment
 
 

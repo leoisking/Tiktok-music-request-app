@@ -19,6 +19,7 @@ from desktop_runtime import (
     WidgetProcess, cloudflared_path, load_settings, protect_secret,
     run_server, save_settings, user_data_dir,
 )
+from spotify_app_config import PUBLIC_CLIENT_ID
 
 
 APP_NAME = 'Live Widget'
@@ -174,13 +175,14 @@ class DesktopApp:
             self.spotify_status.set('Cancelling sign-in...')
 
     def connect_spotify(self):
-        from spotify_oauth_helper import AUTH_URL, DEFAULT_REDIRECT_URI, SCOPES, CallbackServer, _exchange_code_for_tokens
+        from spotify_oauth_helper import AUTH_URL, DEFAULT_REDIRECT_URI, SCOPES, CallbackServer, create_pkce_pair, _exchange_code_for_tokens
 
         if self.oauth_busy or self.busy or self.process.server is not None:
             return
-        client_id = self.variables['SPOTIFY_CLIENT_ID'].get().strip()
-        client_secret = self.variables['SPOTIFY_CLIENT_SECRET'].get().strip()
-        if not client_id or not client_secret:
+        public_client_id = PUBLIC_CLIENT_ID
+        client_id = public_client_id or self.variables['SPOTIFY_CLIENT_ID'].get().strip()
+        client_secret = '' if public_client_id else self.variables['SPOTIFY_CLIENT_SECRET'].get().strip()
+        if not client_id or (not public_client_id and not client_secret):
             self.view.show_error('Enter your own Spotify client ID and client secret first.',
                                  field='SPOTIFY_CLIENT_ID' if not client_id else 'SPOTIFY_CLIENT_SECRET')
             return
@@ -196,10 +198,13 @@ class DesktopApp:
             result = ('spotify_cancelled', '')
             try:
                 state = secrets.token_urlsafe(24)
+                code_verifier, code_challenge = create_pkce_pair() if public_client_id else ('', '')
                 callback = CallbackServer('127.0.0.1', 8888, state)
                 callback.start()
                 parameters = {'client_id': client_id, 'response_type': 'code', 'redirect_uri': DEFAULT_REDIRECT_URI,
                               'scope': SCOPES, 'state': state, 'show_dialog': 'true'}
+                if code_challenge:
+                    parameters.update({'code_challenge_method': 'S256', 'code_challenge': code_challenge})
                 if not webbrowser.open(AUTH_URL + '?' + urllib.parse.urlencode(parameters)):
                     raise RuntimeError('Could not open the browser. Check your default browser and try again.')
                 deadline = time.monotonic() + 180
@@ -210,12 +215,19 @@ class DesktopApp:
                         raise RuntimeError('Spotify authorization timed out. Please try again.')
                 if callback.error or not callback.code:
                     raise RuntimeError('Spotify did not authorize this account. Check your app settings and account access.')
-                tokens = _exchange_code_for_tokens(client_id, client_secret, callback.code, DEFAULT_REDIRECT_URI)
+                tokens = _exchange_code_for_tokens(
+                    client_id, client_secret, callback.code, DEFAULT_REDIRECT_URI,
+                    code_verifier=code_verifier or None,
+                )
                 if self.oauth_cancelled.is_set():
                     return
                 if not tokens.get('refresh_token'):
                     raise RuntimeError('Spotify did not return a refresh token. Please reconnect.')
-                result = ('spotify', (client_id, client_secret, tokens['refresh_token']))
+                result = ('spotify', (
+                    '' if public_client_id else client_id,
+                    '' if public_client_id else client_secret,
+                    tokens['refresh_token'],
+                ))
             except Exception as error:
                 result = ('spotify_error', str(error))
             finally:
