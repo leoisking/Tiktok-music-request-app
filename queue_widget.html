@@ -39,6 +39,10 @@
             -webkit-font-smoothing: antialiased;
         }
         html.transparent-bg, html.transparent-bg body { background: transparent; }
+        :where(button, input, a, [tabindex]):focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 3px;
+        }
 
         .widget {
             width: 100%;
@@ -113,7 +117,7 @@
             font-weight: 800;
             font-size: clamp(20px, 4.4vw, 30px);
             line-height: 1.15;
-            letter-spacing: -0.3px;
+            letter-spacing: 0;
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
@@ -177,7 +181,7 @@
             font-family: var(--font-display);
             font-weight: 800;
             font-size: clamp(16px, 3vw, 20px);
-            letter-spacing: -0.2px;
+            letter-spacing: 0;
         }
         .count {
             font-family: var(--font-display);

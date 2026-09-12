@@ -62,6 +62,13 @@ Live Widget is a real-time song-request and skip-voting overlay for TikTok Live 
 | **Python Source** | Development, customization, and multi-platform workflows | Python 3.14 + project dependencies |
 | **Batch Launcher** | Quick automation for existing local source installations | Python, Cloudflare, & environment configurations |
 
+### Before you start
+
+- **Windows app:** use a 64-bit Windows 10 or 11 computer. No Python installation is needed for a release ZIP.
+- **Run from source:** use 64-bit Python 3.14 or newer and PowerShell. Preview mode is the fastest way to verify the install.
+- **Streaming:** keep the launcher running for the whole stream. OBS browser sources use local URLs; TikTok Studio needs Public HTTPS.
+- **Spotify:** optional. Start with the request queue and overlays first, then connect Spotify once the basic flow works.
+
 ---
 
 ## <div id="toc-guides"></div>🚀 Quick Start Guides
@@ -74,14 +81,17 @@ Live Widget is a real-time song-request and skip-voting overlay for TikTok Live 
 5. Paste the password into the configuration panel that launches in your default browser.
 6. Open the **Overlay links** window and copy either the skip or queue URL into an OBS browser source.
 
+**First-run check:** open the skip overlay in a browser before adding it to your scene. You should see the compact vote meter and a connected status. Add the queue overlay as a second Browser source if you want now-playing and up-next information.
+
 > ℹ️ *Note: Configuration records, local logs, and active queues are securely retained in `%LOCALAPPDATA%\LiveWidget`. Replacing the `LiveWidget.exe` file during updates will not remove these settings.* See [DISTRIBUTION.md](DISTRIBUTION.md) for full delivery workflows.
 
 ### <div id="toc-src-start"></div>2. Run from Source (Python)
-Clone the repository, create an isolated virtual environment, and install the required dependencies:
+Clone this repository, create an isolated virtual environment, and install the required dependencies:
 
 ```powershell
-git clone https://github.com/leoisking/flask-tiktok-socket-setup.git
-cd flask-tiktok-socket-setup
+git clone https://github.com/leoisking/Tiktok-music-request-app.git
+cd Tiktok-music-request-app
+python --version
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -98,6 +108,14 @@ python live_widget.py
 * **Twitch Configuration:** Set `$env:CHAT_SOURCE = "twitch"` and supply a target channel to `$env:TWITCH_CHANNEL`.
 * **Dual Integration:** Set `$env:CHAT_SOURCE = "both"` to aggregate chat streams simultaneously.
 * **Note:** Leave `ALLOWED_ORIGINS` unset to force safe, same-origin restrictions. Wildcards (`*`) are explicitly blocked.
+
+Open these pages after the server starts:
+
+1. `http://127.0.0.1:5000/` for the transparent skip overlay.
+2. `http://127.0.0.1:5000/queue_widget` for the queue and now-playing overlay.
+3. `http://127.0.0.1:5000/control` for the private moderator panel.
+
+In source mode, environment variables belong to the current PowerShell session. Set them again when you open a new terminal.
 
 ---
 
@@ -132,6 +150,15 @@ python live_widget.py
 | ``!threshold auto`` | Revert processing back to automated/calculated metrics |
 
 > 🏷️ *Moderator records require account handles or permanent stable IDs rather than friendly display aliases. Prefix Twitch entries with `twitch:` inside your custom `MOD_LIST` variables.*
+
+## 🎬 Stream-day checklist
+
+1. Start in Preview and confirm both browser sources load.
+2. Confirm the control panel opens locally and unlocks with the generated password.
+3. Switch to TikTok, Twitch, or Both and enter the exact channel/username.
+4. If using TikTok Studio, enable Public HTTPS and replace old browser-source URLs after each restart.
+5. Send a test request and skip vote before going live.
+6. Keep the control panel off-stream and stop the widget when the broadcast ends.
 
 ---
 
