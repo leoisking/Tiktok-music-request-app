@@ -472,6 +472,14 @@ class LauncherView:
                               '2. In OBS add a Browser source and paste a link. Use Public HTTPS for TikTok Studio.\n'
                               '3. Keep the control panel in your own browser and off-stream.')
 
+        guide = self._card(page, 'Recommended first setup',
+                   'Follow this once before your first stream. Preview mode lets you check the layout without connecting live chat.')
+        self._paragraph(guide, '1. Go to Connections and connect Spotify. Approve access in the browser, then choose the Spotify device that should play music.\n'
+                      '2. Go to Stream setup, leave Chat source on Preview, and click Start preview.\n'
+                      '3. Open Overlay links. Add Queue overlay to OBS for now playing and up next, then add Skip overlay for viewer skip votes.\n'
+                      '4. Send a test request with !req Song Name by Artist and a test vote with !skip from the control panel.\n'
+                      '5. When everything looks right, stop Preview, choose TikTok, Twitch, or Both, enter your channel, and start the real session.')
+
     def _setup_page(self):
         page = self.pages['setup']
         self.setup_main = tk.Frame(page, background=BACKGROUND)
@@ -524,18 +532,24 @@ class LauncherView:
         spotify = self._card(page, 'Spotify', 'Let viewer requests join your playback queue. Preview mode never controls playback.')
         self._label(spotify, variable=self.spotify_badge, color=ACCENT, size=8, bold=True).pack(anchor='w', pady=(12, 0))
         if PUBLIC_CLIENT_ID:
-            self._paragraph(spotify, 'Connect your Spotify account in one click. No developer credentials are required.')
+            self._paragraph(spotify, 'Connect your Spotify account in one click. No developer credentials are required. Spotify must be open with an active playback device.')
+            instruction_text = ('1. Start Spotify and choose the device that should play requests.  '
+                                '2. Click Connect Spotify.  3. Approve access in the browser.  '
+                                '4. Return here and confirm the status says connected.')
         else:
-            self._paragraph(spotify, 'Enter credentials for your own Spotify developer app, or configure a public app client ID before packaging.')
+            self._paragraph(spotify, 'Use your own Spotify developer app, then connect the Spotify account that owns the playback device.')
+            instruction_text = ('1. Open your Spotify developer app.  2. Register the redirect URI below exactly.  '
+                                '3. Enter the Client ID and secret.  4. Click Connect Spotify and approve access in the browser.')
         instruction = tk.Frame(spotify, background=INPUT, padx=14, pady=12)
         instruction.pack(fill='x', pady=(14, 0))
-        self._paragraph(instruction, '1. Open your developer app.  2. Register this redirect URI.  3. Connect below.')
+        self._paragraph(instruction, instruction_text)
         row = tk.Frame(instruction, background=INPUT)
         row.pack(fill='x', pady=(9, 0))
         self.redirect_uri = tk.StringVar(value='http://127.0.0.1:8888/callback')
         ttk.Entry(row, textvariable=self.redirect_uri, state='readonly').pack(side='left', fill='x', expand=True)
         self._button(row, 'Copy URI', lambda: self.app.copy(self.redirect_uri.get(), 'Redirect URI'), quiet=True).pack(side='left', padx=(8, 0))
-        self._button(spotify, 'Open Spotify developer dashboard', lambda: self.app.open_url('https://developer.spotify.com/dashboard'), quiet=True).pack(anchor='w', pady=(13, 0))
+        if not PUBLIC_CLIENT_ID:
+            self._button(spotify, 'Open Spotify developer dashboard', lambda: self.app.open_url('https://developer.spotify.com/dashboard'), quiet=True).pack(anchor='w', pady=(13, 0))
         if not PUBLIC_CLIENT_ID:
             self._field(spotify, 'Client ID', 'SPOTIFY_CLIENT_ID', page='connections')
             self._field(spotify, 'Client secret', 'SPOTIFY_CLIENT_SECRET', secret=True, page='connections')
@@ -548,6 +562,7 @@ class LauncherView:
         self.cancel_button.configure(state='disabled')
         self.oauth_progress = ttk.Progressbar(spotify, mode='indeterminate', style='Session.Horizontal.TProgressbar')
         self._paragraph(spotify, variable=self.app.spotify_status)
+        self._paragraph(spotify, 'After connecting, start playback in Spotify. The queue overlay shows the current song and upcoming requests; it does not start playback by itself.', size=9)
         self.advanced_button = self._button(spotify, '+ Advanced Spotify settings', self.toggle_advanced, quiet=True)
         self.advanced_button.pack(anchor='w', pady=(16, 0))
         self.advanced = tk.Frame(spotify, background=SURFACE)
