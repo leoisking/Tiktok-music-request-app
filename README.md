@@ -49,9 +49,7 @@ The easiest option is the **Windows App** from the latest [GitHub Release](https
 
 ## 📌 Table of Contents
 * [Highlights](#toc-highlights)
-* [Choose a Setup](#toc-setup)
-* [Quick Start Guides](#toc-guides)
-  * [Windows App Quick Start](#toc-win-start)
+* [Other Setup Options](#toc-setup)
   * [Run from Source (Python)](#toc-src-start)
 * [Overlay URLs](#toc-urls)
 * [Chat Commands](#toc-commands)
@@ -80,13 +78,15 @@ The easiest option is the **Windows App** from the latest [GitHub Release](https
 
 ---
 
-## <div id="toc-setup"></div>🛠️ Choose a Setup
+## <div id="toc-setup"></div>🛠️ Other Setup Options
 
 | Setup | Best for | Requirements |
 | :--- | :--- | :--- |
 | **Windows App** | Streamers who want a graphical desktop launcher | 64-bit Windows 10 or 11 |
 | **Python Source** | Development, customization, and multi-platform workflows | Python 3.14 + project dependencies |
 | **Batch Launcher** | Quick automation for existing local source installations | Python, Cloudflare, & environment configurations |
+
+The beginner Windows workflow is at the top of this page. Use the options below if you are developing, customizing, or running the project directly from source.
 
 ### Before you start
 
@@ -97,21 +97,7 @@ The easiest option is the **Windows App** from the latest [GitHub Release](https
 
 ---
 
-## <div id="toc-guides"></div>🚀 Quick Start Guides
-
-### <div id="toc-win-start"></div>1. Windows App Quick Start
-1. Download a published `LiveWidget-Windows-x64.zip` package from the [repository releases](https://github.com/leoisking/Tiktok-music-request-app/releases).
-2. **Extract the ZIP file** before opening the app. *Do not run the EXE directly from inside a compressed folder.*
-3. Launch `LiveWidget.exe`, open **Connections**, and click **Connect Spotify**. Approve access in your browser and start playback on the desired Spotify device.
-4. Leave the chat source set to **Preview** for your first initialization test, then click **Start preview**.
-5. Open **Overlay links** and add the **Queue overlay** and **Skip overlay** URLs as separate OBS Browser sources.
-6. Open the private control panel, copy the generated password from **Stream setup**, and use the test area to try `!req` and `!skip`.
-
-**First-run check:** open the skip overlay in a browser before adding it to your scene. You should see the compact vote meter and a connected status. Add the queue overlay as a second Browser source if you want now-playing and up-next information.
-
-> ℹ️ *Note: Configuration records, local logs, and active queues are securely retained in `%LOCALAPPDATA%\LiveWidget`. Replacing the `LiveWidget.exe` file during updates will not remove these settings.* See [DISTRIBUTION.md](DISTRIBUTION.md) for full delivery workflows.
-
-### <div id="toc-src-start"></div>2. Run from Source (Python)
+## <div id="toc-src-start"></div>💻 Run from Source (Python)
 Clone this repository, create an isolated virtual environment, and install the required dependencies:
 
 ```powershell
@@ -190,7 +176,7 @@ In source mode, environment variables belong to the current PowerShell session. 
 
 ## <div id="toc-spotify"></div>🎵 Spotify and Public HTTPS
 
-* **Spotify Setup:** Integration is completely optional. Each streamer must register their own developer portal application client, supply custom secrets, and sign in to their profile. Launcher assets wrap these values via **Windows DPAPI encryption** tied directly to the local Windows profile.
+* **Spotify Setup:** Spotify is recommended for the full experience. Each streamer must register their own developer portal application client, supply custom secrets, and sign in to their profile. Launcher assets wrap these values via **Windows DPAPI encryption** tied directly to the local Windows profile.
 * **TikTok Studio Links:** Toggle the **Public HTTPS** option within your graphical interface. The integrated Cloudflare runtime initiates temporary HTTPS proxy links. *Quick Tunnel endpoints change across restarts and do not provide service uptime guarantees.*
 * **Network Dependencies:** Real-time chat tracking, Spotify connectivity, Cloudflare tunneling, web fonts, and Socket.IO CDNs demand active internet connections. Running in *Preview Mode* bypasses external platform calls.
 
